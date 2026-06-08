@@ -91,7 +91,40 @@ textarea:focus{outline:none;border-color:var(--lblue)}
 .egh{padding:7px 12px;font-size:13px;font-weight:700}
 .egb{padding:12px;display:flex;flex-direction:column;gap:10px}
 .modb{background:#dbeafe;color:#1d4ed8;font-size:10px;padding:1px 5px;border-radius:3px}
-@media print{.ctrl,.ov{display:none!important}#brief{display:block!important}body{background:#fff}.b-hdr,.closing{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+@media print{
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+  .ctrl,.ov,.hdr{display:none!important}
+  #brief{display:block!important}
+  body{background:#fff;margin:0;padding:0}
+  .wrap{max-width:100%;padding:0;margin:0}
+  .b-hdr{padding:10px 14px;margin-bottom:8px;border-radius:6px}
+  .b-title{font-size:20px}
+  .kpi{padding:6px 8px;min-width:72px}
+  .kv{font-size:15px}
+  .kl{font-size:9px}
+  .g2{gap:8px;margin-bottom:8px}
+  .card{border-radius:6px}
+  .ch{padding:6px 12px;font-size:12px}
+  .clist{padding:7px 10px;gap:5px}
+  .ci{padding:6px 8px}
+  .ct{font-size:12px;line-height:1.4}
+  .alerts{padding:7px 10px;gap:4px}
+  .chip{font-size:11px;padding:3px 8px}
+  .closing{padding:10px 14px;margin-bottom:8px;border-radius:6px}
+  .cl-t{font-size:13px}.cl-s{font-size:11px}
+  .cl-ico{font-size:22px}
+  .bfoot{font-size:10px;padding:4px 0 8px}
+  table{font-size:10.5px}
+  th,td{padding:4px 5px!important}
+  #reg-s{page-break-before:always;break-before:page;display:block!important}
+  #reg-s .rtbl{font-size:11px}
+  #reg-s .rtbl th,#reg-s .rtbl td{padding:5px 8px}
+  .card{page-break-inside:avoid;break-inside:avoid}
+  .b-hdr{page-break-inside:avoid;break-inside:avoid}
+  .closing{page-break-inside:avoid;break-inside:avoid}
+  tr{page-break-inside:avoid;break-inside:avoid}
+  @page{size:A4 portrait;margin:10mm 10mm 8mm 10mm}
+}
 </style>
 </head>
 <body>
@@ -842,9 +875,52 @@ function genBriefGlobal(type){
   if(nbRegr>nbPerf) alG.push({t:'warn',l:'Plus de rayons en régression ('+nbRegr+') qu\'en progression ('+nbPerf+')'});
   if(!alG.length) alG.push({t:'good',l:'✓ Situation globale satisfaisante'});
 
+  // Synthèse détaillée par département : positifs / négatifs / stables
+  var synthDepts='';
+  depts.forEach(function(dept){
+    var pos=0,neg=0,stab=0;
+    dept.rayons.forEach(function(k){
+      var ev=(D[k]&&D[k].ev)||0;
+      if(ev>0) pos++; else if(ev<0) neg++; else stab++;
+    });
+    var tot=dept.rayons.length;
+    var pctPos=tot?Math.round(pos/tot*100):0;
+    var pctNeg=tot?Math.round(neg/tot*100):0;
+    var barPos=tot?Math.round(pos/tot*100):0;
+    var barNeg=tot?Math.round(neg/tot*100):0;
+    var barStab=100-barPos-barNeg;
+    var statut=pos>neg?'good':neg>pos?'bad':'warn';
+    var coulBord=pos>neg?'#16a34a':neg>pos?'#dc2626':'#ea580c';
+    synthDepts+=
+      '<div style="background:#f9fafb;border-radius:7px;padding:9px 12px;border-left:3px solid '+coulBord+';flex:1;min-width:140px">'+
+        '<div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px">'+dept.nom+' <span style="font-size:10px;font-weight:400;color:#6b7280">('+tot+' rayons)</span></div>'+
+        '<div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">'+
+          '<span style="font-size:13px;font-weight:800;color:#16a34a">▲ '+pos+'</span>'+
+          '<span style="font-size:13px;font-weight:800;color:#dc2626">▼ '+neg+'</span>'+
+          (stab?'<span style="font-size:12px;color:#6b7280">— '+stab+'</span>':'')+
+        '</div>'+
+        '<div style="height:7px;border-radius:4px;overflow:hidden;background:#e5e7eb;display:flex">'+
+          (barPos?'<div style="width:'+barPos+'%;background:#16a34a;border-radius:4px 0 0 4px"></div>':'')+
+          (barStab?'<div style="width:'+barStab+'%;background:#d1d5db"></div>':'')+
+          (barNeg?'<div style="width:'+barNeg+'%;background:#dc2626;border-radius:0 4px 4px 0"></div>':'')+
+        '</div>'+
+      '</div>';
+  });
+
   h+='<div class="card full" style="margin-bottom:12px">'+
     '<div class="ch al">⚡ Synthèse</div>'+
-    '<div class="alerts">'+alG.map(function(a){return '<span class="chip '+a.t+'">'+a.l+'</span>';}).join('')+'</div>'+
+    '<div style="padding:10px 12px 4px">'+
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">'+synthDepts+'</div>'+
+      '<div style="display:flex;gap:14px;align-items:center;padding:8px 10px;background:#f0fdf4;border-radius:6px;margin-bottom:8px;flex-wrap:wrap">'+
+        '<span style="font-size:12px;font-weight:700;color:#166534">Bilan global :</span>'+
+        '<span style="font-size:13px;font-weight:800;color:#16a34a">▲ '+nbPerf+' rayons positifs</span>'+
+        '<span style="color:#d1d5db">|</span>'+
+        '<span style="font-size:13px;font-weight:800;color:#dc2626">▼ '+nbRegr+' rayons négatifs</span>'+
+        '<span style="color:#d1d5db">|</span>'+
+        '<span style="font-size:12px;color:#6b7280">'+nbTot+' rayons au total</span>'+
+      '</div>'+
+      '<div class="alerts" style="padding:0 0 6px">'+alG.map(function(a){return '<span class="chip '+a.t+'">'+a.l+'</span>';}).join('')+'</div>'+
+    '</div>'+
   '</div>';
 
   h+='<div class="closing"><div class="cl-ico">📊</div><div>'+
