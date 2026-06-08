@@ -139,8 +139,8 @@ textarea:focus{outline:none;border-color:var(--lblue)}
       </div>
       <button class="btn btn-blue" onclick="genBrief()">▶ Générer</button>
       <button class="btn btn-pur" id="btn-man" onclick="ouvMan()">✏️ Consignes manuelles</button>
+      <button class="btn btn-cyn" id="btn-edt" onclick="ouvEdit()" disabled>⚙️ Modifier consignes</button>
       <button class="btn btn-out" onclick="imprimer()">🖨️ Imprimer</button>
-      <button class="btn" id="btn-dbg" onclick="ouvDebug()" style="border:1.5px solid #6b7280;background:#fff;color:#6b7280;font-size:11px" title="Debug parsers PDF">🔍 Debug</button>
       <button class="btn btn-org" id="btn-reg" onclick="affReg()" disabled>🌍 Classement Région</button>
       <div class="stat" id="stat">Chargez les PDFs Darwin pour alimenter les données.</div>
     </div>
@@ -165,12 +165,14 @@ textarea:focus{outline:none;border-color:var(--lblue)}
   </div>
 </div>
 
-<!-- MODAL DEBUG -->
-<div class="ov" id="ov-dbg">
-  <div class="modal" style="max-width:820px">
-    <div class="mh" style="background:#374151;color:#fff"><span>🔍 Debug Parsers PDF — Données brutes extraites</span><button class="mclose" onclick="fov('ov-dbg')">×</button></div>
-    <div class="mbody" style="max-height:75vh;overflow-y:auto;gap:14px">
-      <div id="dbg-c" style="font-family:monospace;font-size:12px"></div>
+<!-- MODAL EDIT -->
+<div class="ov" id="ov-edt">
+  <div class="modal wide">
+    <div class="mh cyan"><span>⚙️ Modifier les consignes automatiques</span><button class="mclose" onclick="fov('ov-edt')">×</button></div>
+    <div class="mbody">
+      <p class="mnote">Modifications appliquées <strong>une seule fois</strong> au prochain brief uniquement. Les consignes originales sont préservées. Vider un champ masque cette consigne.</p>
+      <div id="edit-c"></div>
+      <div class="mfoot"><button class="btn btn-blue" onclick="appEdit()">✓ Appliquer au prochain brief</button></div>
     </div>
   </div>
 </div>
@@ -238,8 +240,7 @@ var DATE_STR = '';
 var D = {};   // données chiffrées par rayon (PDF Perf + Classement)
 var REG = {}; // classement région (PDF Comparaison) — indexé par numéro rayon
 var RAYON_PDF_COMPAR = null; // Ajout : rayon détecté dans le PDF comparaison
-var DBG_TXT_COMPAR = '';    // texte brut PDF comparaison pour debug
-var SHOT = null; // réservé — non utilisé (consignes auto supprimées)
+var SHOT = null; // modifications temporaires consignes (one-shot)
 var mOp1='', mOp2='', mCl=''; // consignes manuelles persistantes
 var rayonK = null; // rayon actuellement sélectionné
 
@@ -443,7 +444,6 @@ function premierEntre(ns, start, lo, hi){
 }
 
 function parserCompar(txt){
-  DBG_TXT_COMPAR=txt; // stockage pour debug
   // 1. DÉTECTION AUTOMATIQUE DU RAYON dans le PDF
   var rayonDetecte=null;
   for(var ci=0;ci<MAP_COMPAR.length;ci++){
@@ -474,34 +474,16 @@ function parserCompar(txt){
   // Structure ligne : DTF SUD EST [CA] [évol_CA%] [▼/▲] [débits] [évol_deb%] [▲/▼] [panier] [évol_pan%]
   var dtfLigne=null;
   txt.split('\n').forEach(function(l){
-    // Exiger >=5 nombres sur la ligne pour éviter de capturer la ligne titre
-    // "Comparaison magasins | DTF SUD EST - Vendredi 05/06/2026" → seulement 3 nums
-    if(!dtfLigne && /DTF\s+SUD\s+EST/i.test(l) && getNums(l).length>=5) dtfLigne=l;
+    if(!dtfLigne && /DTF\s+SUD\s+EST/i.test(l)) dtfLigne=l;
   });
   if(dtfLigne){
     var dtfNs=getNums(dtfLigne);
-    // Structure réelle après getNums (espace dans les milliers) :
-    // "DTF SUD EST 143,6 -0,9% ▼ 27 318 14,4% ▲ 5,3 -13,4% ▼"
-    // → [143.6, -0.9, 27, 318, 14.4, 5.3, -13.4]
-    // Les débits "27 318" sont coupés en [27, 318] → reconstruire si ns[2] est 1 ou 2 chiffres
-    // et ns[3] est 3 chiffres (entre 100 et 999)
+    // dtfNs[0]=CA, dtfNs[1]=évol_CA, dtfNs[2]=débits, dtfNs[3]=évol_deb, dtfNs[4]=panier
     if(dtfNs.length>=5){
-      reg.dtf.ca  = dtfNs[0];
-      reg.dtf.ev  = dtfNs[1];
-      // Détection débits en milliers fragmentés
-      var d2=dtfNs[2], d3=dtfNs[3];
-      var debFragmente=(d2===Math.round(d2)&&d2>=1&&d2<=99&&d3===Math.round(d3)&&d3>=100&&d3<=999);
-      if(debFragmente){
-        // [CA, ev, X, YYY, évol_deb, panier, évol_pan]
-        reg.dtf.deb = d2*1000 + d3;  // ex: 27*1000+318 = 27318
-        reg.dtf.ev_deb = dtfNs[4];   // 14.4
-        reg.dtf.pan    = dtfNs[5];   // 5.3
-      } else {
-        // Débits non fragmentés (< 1000)
-        reg.dtf.deb    = d2;
-        reg.dtf.ev_deb = d3;
-        reg.dtf.pan    = dtfNs[4];
-      }
+      reg.dtf.ca =dtfNs[0];
+      reg.dtf.ev =dtfNs[1];
+      reg.dtf.deb=dtfNs[2];
+      reg.dtf.pan=dtfNs[4];
     }
   }
 
@@ -526,45 +508,15 @@ function parserCompar(txt){
     if(!sn.length) return;
 
     var deb=0, pan=0;
-    // Structure suite après la regex (évol% déjà consommée) :
-    // Cas A — débits fragmentés ex "1 364 1,4% ▲ 5,8" → sn=[1, 364, 1.4, 5.8, ...]
-    //   sn[0]=milliers (1 ou 2), sn[1]=centaines(100-999) → deb=sn[0]*1000+sn[1]
-    //   sn[2] = évolution débits (petite valeur ±, souvent <50), sn[3] = panier (1-15)
-    // Cas B — débits non fragmentés ex "352 -4,9% ▲ 5,2" → sn=[352, -4.9, 5.2, ...]
-    //   sn[0]=débits, sn[1]=évol_débits, sn[2]=panier
-    // Cas C — débits sans évol ex "722 4,8" → sn=[722, 4.8]
-    //   sn[0]=débits, sn[1]=panier
-    if(sn.length>=2 && (sn[0]===1||sn[0]===2) && sn[1]===Math.round(sn[1]) && sn[1]>=10 && sn[1]<=999){
-      // Cas A : débits fragmentés en milliers
-      deb = sn[0]*1000 + sn[1];
-      // sn[2] = évol débits (peut être absent), sn[3] ou sn[2] = panier
-      // Le panier est entre 1 et 15 K€, l'évol débits aussi peut être petit
-      // → chercher le premier nombre entre 1.0 et 15.0 qui n'est pas une évol (absolu > 0.5)
-      // Stratégie : si sn[2] existe et sn[3] existe → sn[2]=évol_deb, sn[3]=panier
-      //             si sn[2] existe seul → c'est le panier directement (pas d'évol débits)
-      if(sn.length>=4 && sn[3]>=1 && sn[3]<=15){
-        pan = sn[3];
-      } else if(sn.length>=3 && sn[2]>=1 && sn[2]<=15){
-        // Ambiguïté : sn[2] est-il évol_deb ou panier ?
-        // L'évol_deb est en %, généralement petit et peut être négatif
-        // Le panier est positif et entre 1 et 15
-        // Si sn.length===3, il n'y a pas d'évol_deb → c'est le panier
-        pan = sn[2];
-      } else {
-        pan = premierEntre(sn, 2, 1, 15);
-      }
+    if(sn.length>=2 && (sn[0]===1||sn[0]===2) && sn[1]>=10 && sn[1]<=999){
+      deb=sn[0]*1000+sn[1];
+      pan=premierEntre(sn,2,1,15);
     } else {
-      // Cas B/C : débits non fragmentés
-      deb = Math.round(Math.abs(sn[0]));
-      if(sn.length>=3 && sn[2]>=1 && sn[2]<=15){
-        // sn[1]=évol_deb, sn[2]=panier
-        pan = sn[2];
-      } else if(sn.length===2 && sn[1]>=1 && sn[1]<=15){
-        // Cas C : pas d'évol débits, juste panier
-        pan = sn[1];
-      } else {
-        pan = premierEntre(sn, 1, 1, 15);
-      }
+      deb=Math.round(Math.abs(sn[0]));
+      // Structure suite : [débits, évol_débits%, panier, évol_panier%]
+      // sn[1] = évol_débits (ex: 1.4%), sn[2] = panier (ex: 5.8)
+      // Prendre sn[2] pour éviter de confondre évol_débits avec panier
+      pan=(sn.length>=3 && sn[2]>=1 && sn[2]<=15) ? sn[2] : premierEntre(sn,1,1,15);
     }
 
     var exists=reg.mags.some(function(x){return x.rang===rang;});
@@ -636,37 +588,63 @@ function setStat(msg,cls){var el=document.getElementById('stat');el.textContent=
 // ═══════════════════════════════════════════════════
 function rnd(arr){return arr[Math.floor(Math.random()*arr.length)];}
 
-// ═══════════════════════════════════════════════════
-// FORMATAGE DONNÉES CHIFFRÉES
-// ═══════════════════════════════════════════════════
-function fmtV(v,dec,suf){
-  var s=(v>=0?'+':'')+v.toFixed(dec||0)+(suf||'');
+// Templates de base (JAMAIS modifiés)
+var CV={
+  pgc_o1:["Contrôle DLC / DDM : Tour du rayon, retirer tout produit périmé. Priorité aux bas-de-rayon et têtes de gondole.","Vérification des dates : Parcourir l'ensemble du linéaire, écarter les produits arrivés à date. Attention aux zones basses.","Tour DLC / DDM : Retirer sans exception tout article périmé. Insister sur les emplacements difficiles d'accès."],
+  pgc_o2:["Ruptures : Pour chaque trou — vérifier le stock, corriger si erroné, passer 1 carton commande client, ajuster le SMP si besoin.","Chasse aux ruptures : Repérer chaque référence manquante, corriger les stocks, relancer via 1 carton commande client et revoir le SMP.","Tour des ruptures : Identifier les emplacements vides, corriger le stock, commander 1 carton pour réamorcer l'automatique, ajuster le SMP."],
+  pgc_o3:["SMP : Vérifier que le Stock Mini Permanent reflète la rotation réelle. Corriger les valeurs à 0 ou sous-dimensionnées.","Mise à jour des SMP : Contrôler que le SMP est adapté à la vitesse d'écoulement. Revaloriser si insuffisant.","SMP à ajuster : Après traitement des ruptures, s'assurer que les minima correspondent à la réalité. Relever ceux trop bas."],
+  pgc_c1:["Réserve : Évacuer cartons et emballages vides, ranger proprement, allées dégagées.","Rangement réserve : Désencombrer les allées, retirer les emballages inutiles, vérifier l'accès aux issues.","Réserve : Sortir les cartons vides, libérer les passages, ranger les produits de façon ordonnée."],
+  pgc_c2:["Linéaire : Contrôler chaque étagère, redresser les articles déplacés, vérifier la stabilité des tablettes.","Vérification étagères : Repositionner les articles tombés ou mal alignés, s'assurer que les rayonnages sont en bon état.","Tour des rayonnages : Redresser ce qui est renversé, contrôler l'état et la propreté des tablettes."],
+  pgc_c3:["Facing : Remettre tous les produits face-client, boucher les trous de présentation, vérifier les étiquettes de prix.","Tenue du rayon : Facing complet, contrôle des prix, aucun trou apparent.","Facing & prix : Repositionner face-client, combler les vides, chaque référence correctement étiquetée."],
+  pls_o1:["DLC frais : Tour des meubles réfrigérés, retirer tout produit périmé. Vérifier l'intégrité des emballages et les étiquettes.","Contrôle DLC : Parcourir les frais libre-service, écarter les articles arrivés à date. Contrôler l'état des conditionnements.","Tour DLC frais LS : Inspecter chaque meuble, sortir les produits périmés, vérifier la traçabilité."],
+  pls_o2:["Ruptures : Repérer chaque trou, corriger le stock si erroné, 1 carton commande client, ajuster le SMP.","Chasse aux ruptures : Identifier les manquants, corriger les stocks négatifs, relancer via 1 carton commande client, revoir les SMP.","Tour des ruptures : Pour chaque vide — corriger le stock, commander 1 carton pour réamorcer l'automatique, puis vérifier le SMP."],
+  pls_o3:["SMP : Vérifier que le Stock Mini Permanent est cohérent avec la rotation journalière. Relever les valeurs insuffisantes.","Mise à jour SMP : Minima à refléter la réalité de vente. Corriger si nécessaire.","SMP à contrôler : Vérifier l'adéquation du SMP avec la vitesse d'écoulement. Revaloriser les SMP trop bas."],
+  pls_c1:["Chambre froide & réserve : Dégager les allées, évacuer les emballages vides, produits bien identifiés.","Réserve PLS : Sortir les cartons vides, libérer les accès, vérifier l'organisation et la lisibilité.","Rangement réserve : Désencombrer la chambre froide, évacuer les emballages, allées libres."],
+  pls_c2:["Meubles froids : Contrôler les températures (+4°C max frais / -18°C surgel.). Nettoyer vitrines, joints et étagères. Signaler toute anomalie.","Températures & nettoyage : Vérifier les relevés de chaque meuble, nettoyer les surfaces, noter tout écart dans le cahier.","Contrôle froid : Tour des températures, nettoyage des vitrines et joints, signalement immédiat si anomalie."],
+  pls_c3:["Linéaire frais : Redresser les articles mal positionnés, contrôler les étagères, vérifier les étiquettes de prix.","Tenue étagères : Repositionner les produits déplacés, bon état des rayonnages, contrôler les prix.","Tour rayonnages : Vérifier l'alignement des produits, l'état des tablettes et la conformité des affichages de prix."],
+  pft_tb:["Traçabilité & origine : Vérifier lot, date de réception et origine sur chaque produit en vitrine. Contrôler l'affichage réglementaire.","Contrôle traçabilité : Fiche complète (lot, réception, origine) pour chaque article. Affichage de l'origine conforme.","Traçabilité obligatoire : Lot, date et origine documentés sur chaque produit. Vérifier l'étiquetage vitrine."],
+  pft_fl:["Origine & traçabilité : Vérifier l'affichage de l'origine sur chaque produit. Retirer tout article sans fiche conforme.","Fiches origine : Chaque référence affiche son origine complète. Écarter les produits sans traçabilité. Fraîcheur de l'étalage.","Contrôle origine : Étiquettes d'origine à jour et lisibles, fiches traçabilité présentes, fraîcheur visuelle de l'étalage."],
+  pft_bo:["Allergènes & DLC : Vérifier que les 14 allergènes sont affichés lisiblement pour chaque produit maison. Retirer les articles périmés.","Contrôle allergènes : Affichage complet et à jour. DLC vérifiées, produits périmés retirés sans exception.","Étiquetage allergènes : Chaque préparation maison doit afficher les 14 allergènes réglementaires. Contrôle DLC simultané."],
+  pft_dl:["DLC & qualité : Vérifier les dates en vitrine et réserve. Retirer tout article périmé ou présentant un défaut d'aspect.","Tour DLC frais : Inspecter vitrine et réserve, écarter les produits arrivés à date ou abîmés, contrôler les conditionnements.","Contrôle qualité & DLC : Parcourir l'intégralité des produits frais, retirer les hors-date et articles en mauvais état."],
+  pft_o2:["Ruptures : Pour chaque emplacement vide — corriger le stock, 1 carton commande client pour relancer l'automatique.","Chasse aux ruptures : Repérer les trous, corriger les stocks, commander 1 carton pour réamorcer les commandes automatiques.","Tour des ruptures : Identifier les absences, corriger les stocks négatifs, relancer via 1 carton commande client."],
+  pft_o3:["SMP & marge : Vérifier les SMP des ruptures traitées, corriger les valeurs insuffisantes. Contrôler les coûts d'achat.","Mise à jour SMP : Minima à la hauteur de la rotation. Vérifier le prix d'achat pour la marge.","SMP & coût d'achat : Revaloriser les SMP trop bas, contrôler les tarifs des dernières livraisons pour la marge."],
+  pft_c1:["Meubles froids : Relever les températures, nettoyer vitrines, joints et bacs. Consigner toute anomalie dans le cahier d'hygiène.","Contrôle froid & nettoyage : Vérifier les températures, nettoyer les surfaces, signaler tout écart.","Températures & hygiène : Tour des relevés de froid, nettoyage complet, traçabilité dans le cahier."],
+  pft_c2:["Réserve & chambre froide : Évacuer déchets et emballages de découpe, dégager les allées et sorties de secours.","Rangement réserve : Sortir les emballages usagés, libérer les accès, issues de secours dégagées.","Chambre froide : Évacuer les déchets, désencombrer les allées, accès libres et sécurisés."],
+  pft_c3:["Plans de travail : Désinfecter plans, planches et ustensiles. Nettoyer le sol de la zone PFT. Consigner dans le cahier.","Nettoyage zone PFT : Désinfecter les surfaces et outils, nettoyer le sol, traçabilité dans le cahier.","Hygiène zone de production : Désinfecter après chaque usage, nettoyer le sol, renseigner le cahier d'hygiène."],
+  na_o1:["Facing & rangement : Remettre chaque article à sa place, facing face-client sur toutes les étagères, vérifier les étiquettes de prix.","Tenue du rayon : Replacer les articles selon le plan, facing complet, chaque référence correctement balisée.","Rangement & facing : Remettre en ordre l'ensemble du rayon, facing soigné, contrôle des prix et du balisage."],
+  na_o2:["Ruptures : Pour chaque manquant — corriger le stock si erroné, 1 carton commande client pour relancer l'automatique, ajuster le SMP.","Chasse aux ruptures : Repérer les trous, corriger les stocks, passer 1 carton commande client, revoir les SMP.","Tour des ruptures : Identifier les absences, corriger le stock, relancer via 1 carton commande client, vérifier le SMP."],
+  na_o3:["SMP : Vérifier que le Stock Mini Permanent reflète la vitesse de vente. Corriger les valeurs à 0 ou insuffisantes.","Mise à jour SMP : Minima à garantir le réapprovisionnement automatique. Corriger si nécessaire.","SMP à revoir : Contrôler et ajuster le SMP pour éviter que les ruptures se reproduisent."],
+  na_c1:["Réserve : Évacuer cartons vides et emballages, dégager les allées et sorties de secours, vérifier l'état du mobilier.","Rangement réserve : Sortir les emballages inutiles, libérer les accès, contrôler le mobilier de stockage.","Réserve : Désencombrer, évacuer les déchets, s'assurer que les issues restent libres."],
+  na_c2:["Linéaire : Contrôler l'état de chaque étagère, redresser les articles déplacés, vérifier la stabilité des tablettes.","Tour des rayonnages : Repositionner les articles tombés ou mal alignés, vérifier la solidité des étagères.","Vérification étagères : Redresser ce qui est renversé, contrôler les tablettes et signaler toute dégradation."],
+  na_c3:["Tenue visuelle : Dépoussiérer les étagères et articles exposés, soigner les têtes de gondole, allées propres.","Propreté rayon : Dépoussiérer, soigner la mise en scène des têtes de gondole, vérifier la propreté des allées.","Présentation : Dépoussiérer l'ensemble, mettre en valeur les têtes de gondole, maintenir les allées libres et propres."]
+};
+
+// Référence (premier variant) — utilisée dans le modal edit
+var CO={};
+Object.keys(CV).forEach(function(k){CO[k]=CV[k][0];});
+
+// Fonction de lecture consigne — SHOT prioritaire si défini (même vide = masquage), sinon variant aléatoire
+function lC(k){
+  if(SHOT && k in SHOT) return SHOT[k];
+  return CV[k] ? rnd(CV[k]) : (CO[k]||'');
+}
+
+function fmtC(s){
+  if(!s) return '';
+  var i=s.indexOf(':');
+  if(i>0&&i<80) return '<strong>'+s.substring(0,i)+' :</strong>'+s.substring(i+1);
   return s;
 }
-function colEv(v){return v>0?'#16a34a':v<0?'#dc2626':'#6b7280';}
-function colBg(v){return v>0?'#dcfce7':v<0?'#fee2e2':'#f9fafb';}
-function colRupt(v){return v>50?'#dc2626':v>0?'#ea580c':'#16a34a';}
-function colBgRupt(v){return v>50?'#fee2e2':v>0?'#fff7ed':'#dcfce7';}
-function colStk(v){return v>20?'#dc2626':v>0?'#ea580c':'#16a34a';}
-function colBgStk(v){return v>20?'#fee2e2':v>0?'#fff7ed':'#dcfce7';}
-function iconeEv(v){return v>0?'▲':v<0?'▼':'–';}
 
-// Construit une "data-cell" : libellé + valeur + indicateur visuel
-function dCell(lbl,valStr,couleur,bgCouleur,note){
-  return '<div style="background:'+bgCouleur+';border-radius:8px;padding:10px 14px;min-width:110px;flex:1">'+
-    '<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#6b7280;letter-spacing:.4px;margin-bottom:4px">'+lbl+'</div>'+
-    '<div style="font-size:22px;font-weight:800;color:'+couleur+';line-height:1">'+valStr+'</div>'+
-    (note?'<div style="font-size:11px;color:'+couleur+';opacity:.8;margin-top:3px">'+note+'</div>':'')+
-  '</div>';
-}
-
-// Construit une ligne de tableau données
-function dRow(lbl,valStr,couleur,souslbl){
-  return '<tr>'+
-    '<td style="padding:7px 12px;font-size:12px;color:#4b5563;font-weight:500;border-bottom:1px solid #f3f4f6">'+lbl+'</td>'+
-    '<td style="padding:7px 12px;font-size:13px;font-weight:700;color:'+couleur+';text-align:right;border-bottom:1px solid #f3f4f6">'+valStr+'</td>'+
-    (souslbl?'<td style="padding:7px 12px;font-size:11px;color:#9ca3af;border-bottom:1px solid #f3f4f6">'+souslbl+'</td>':'<td style="border-bottom:1px solid #f3f4f6"></td>')+
-  '</tr>';
+function getCons(k){
+  var t=META[k]?META[k].t:'na'; var op=[],cl=[];
+  if(t==='pgc'){op=[lC('pgc_o1'),lC('pgc_o2'),lC('pgc_o3')];cl=[lC('pgc_c1'),lC('pgc_c2'),lC('pgc_c3')];}
+  else if(t==='pls'){op=[lC('pls_o1'),lC('pls_o2'),lC('pls_o3')];cl=[lC('pls_c1'),lC('pls_c2'),lC('pls_c3')];}
+  else if(t==='pft'){
+    var c1=k==='20'||k==='21'||k==='24'?lC('pft_tb'):k==='22'?lC('pft_fl'):k==='23'?lC('pft_bo'):lC('pft_dl');
+    op=[c1,lC('pft_o2'),lC('pft_o3')];cl=[lC('pft_c1'),lC('pft_c2'),lC('pft_c3')];
+  } else {op=[lC('na_o1'),lC('na_o2'),lC('na_o3')];cl=[lC('na_c1'),lC('na_c2'),lC('na_c3')];}
+  return{op:op,cl:cl};
 }
 
 // ═══════════════════════════════════════════════════
@@ -682,7 +660,7 @@ var MSG_POS=[
 ];
 var MSG_NEG=[
   {t:"Point d'amélioration :",s:"Les stocks négatifs sont à corriger en priorité pour fiabiliser les commandes automatiques."},
-  {t:"Point d'amélioration :",s:"Les ruptures catalogue pénalisent le CA — chasse aux trous et commande 1 carton pour chaque référence manquante."},
+  {t:"Point d'amélioration :",s:"Les ruptures assortiment pénalisent le CA — chasse aux trous et commande 1 carton pour chaque référence manquante."},
   {t:"Point d'amélioration :",s:"Le chiffre d'affaires est en recul — renforcer le facing et la disponibilité produit pour limiter la perte."},
   {t:"Point d'amélioration :",s:"La marge est sous pression — contrôler les prix d'achat et limiter les démarques non justifiées."},
   {t:"Point d'amélioration :",s:"L'écart au budget persiste — chaque vente compte pour rattraper le retard."}
@@ -705,15 +683,26 @@ function buildClosing(d){
 // ═══════════════════════════════════════════════════
 // GÉNÉRATION DU BRIEF
 // ═══════════════════════════════════════════════════
+function onSel(){
+  rayonK=document.getElementById('sel').value||null;
+  document.getElementById('btn-edt').disabled=!rayonK;
+  verifierCorrespondanceRayon(); // vérifier si le bouton région doit être actif
+  var rs=document.getElementById('reg-s');
+  if(rs) rs.style.display='none';
+}
+
 function sg(v){return v>=0?'up':'dn';}
 
 function onSel(){
   var v=document.getElementById('sel').value||null;
   rayonK=(v==='ALIMENTAIRE'||v==='NON_ALIMENTAIRE')?null:v;
+  document.getElementById('btn-edt').disabled=!rayonK;
   verifierCorrespondanceRayon();
   var rs=document.getElementById('reg-s');
   if(rs) rs.style.display='none';
 }
+
+function sg(v){return v>=0?'up':'dn';}
 
 // ═══════════════════════════════════════════════════
 // DÉPARTEMENTS — structure pour vue globale
@@ -868,6 +857,7 @@ function genBriefGlobal(type){
   document.getElementById('brief-c').innerHTML=h;
   document.getElementById('brief').style.display='block';
   document.getElementById('brief').scrollIntoView({behavior:'smooth',block:'start'});
+  document.getElementById('btn-edt').disabled=true;
   document.getElementById('btn-reg').disabled=true;
 }
 
@@ -881,14 +871,16 @@ function genBrief(){
   rayonK=k;
   var m=META[k], d=D[k]||{};
 
-  // SHOT non utilisé (consignes auto supprimées)
-  SHOT=null;
+  // Lire consignes AVANT reset (SHOT temporaire)
+  var c=getCons(k);
+  SHOT=null; // réinitialisation après usage (one-shot)
+  majBtnEdit();
 
   var al=[];
   if(d.stk>20)     al.push({t:'bad',l:'⚠ '+d.stk+' stocks négatifs'});
   else if(d.stk>0) al.push({t:'warn',l:d.stk+' stocks négatifs'});
-  if(d.rupt>50)     al.push({t:'bad',l:'⚠ '+d.rupt+' ruptures catalogue'});
-  else if(d.rupt>0) al.push({t:'warn',l:d.rupt+' ruptures catalogue'});
+  if(d.rupt>50)     al.push({t:'bad',l:'⚠ '+d.rupt+' ruptures assortiment'});
+  else if(d.rupt>0) al.push({t:'warn',l:d.rupt+' ruptures assortiment'});
   if(d.ev<-15)  al.push({t:'bad',l:'CA en forte baisse ('+(d.ev>=0?'+':'')+d.ev.toFixed(1)+'%)'});
   if(d.dm<-3)   al.push({t:'bad',l:'Marge en recul ('+(d.dm>=0?'+':'')+d.dm.toFixed(2)+' pts)'});
   if(d.dm>2)    al.push({t:'good',l:'✓ Marge en progression (+'+d.dm.toFixed(2)+' pts)'});
@@ -896,207 +888,23 @@ function genBrief(){
   if(d.bud<-2)  al.push({t:'warn',l:'Écart budget '+d.bud.toFixed(1)+' K€'});
   if(!al.length) al.push({t:'good',l:'✓ Situation globale correcte'});
 
+  function opR(t,n){
+    if(!t) return '';
+    return '<div class="ci"><div class="cn">'+n+'</div><div class="ct">'+fmtC(t)+'</div></div>';
+  }
+  function clR(t,n){
+    if(!t) return '';
+    return '<div class="ci cl"><div class="cn">'+n+'</div><div class="ct">'+fmtC(t)+'</div></div>';
+  }
   function mR(t,isCl){
     return '<div class="ci man'+(isCl?' cl':'')+'"><div class="cn">+</div><div class="ct">'+esc(t)+'<span class="mbadge">MANUEL</span></div></div>';
   }
 
-  // ─── CARD 1 : PERFORMANCE CA / MARGE ────────────────────────────────────────
-  // Toutes valeurs vérifiées : 0 si absent du PDF, couleurs sur seuils stricts
-  var caStr  = (d.ca && d.ca!==0) ? d.ca.toFixed(1)+' K€' : '–';
-  var caCol  = (d.ca && d.ca!==0) ? colEv(d.ev) : '#6b7280';
-  var evStr  = (d.ev!==undefined&&d.ev!==0) ? fmtV(d.ev,1,'%')+' vs N-1' : (d.ev===0?'= N-1':'non extrait');
-  var evCol  = colEv(d.ev||0);
-
-  var budStr = (d.bud!==undefined&&d.bud!==0) ? fmtV(d.bud,1,' K€') : (d.bud===0?'= Budget':'–');
-  var budCol = colEv(d.bud||0);
-  var budBg  = colBg(d.bud||0);
-
-  var txStr  = (d.taux && d.taux!==0) ? d.taux.toFixed(2)+'%' : '–';
-  var txNote = (d.taux && d.taux!==0) ? 'taux de marge' : 'non extrait';
-  var txCol  = (d.taux && d.taux!==0) ? '#003d8f' : '#9ca3af';
-
-  var dmStr  = (d.dm!==undefined&&d.dm!==0) ? fmtV(d.dm,2,' pts') : (d.dm===0?'= N-1':'–');
-  var dmNote = (d.dm!==undefined&&d.dm!==0) ? 'vs N-1' : '';
-  var dmCol  = colEv(d.dm||0);
-  var dmBg   = colBg(d.dm||0);
-
-  var rangStr = (d.rang && d.rang>=1) ? d.rang.toString() : '–';
-  var erStr   = (d.er!==undefined&&d.er!==0) ? fmtV(d.er,0,' pl.') : (d.er===0?'stable':'–');
-  var erCol   = colEv(d.er||0);
-  var rangBg  = '#eff6ff';
-
-  var perfCard =
-    '<div class="card full" style="margin-bottom:12px">'+
-      '<div class="ch" style="background:#eff6ff;color:#1e40af;border-bottom:1px solid #dbeafe">'+
-        '📊 Performance — Source Darwin'+
-      '</div>'+
-      // Ligne big cells CA + Évol
-      '<div style="padding:12px 14px 8px;display:flex;flex-wrap:wrap;gap:8px">'+
-        dCell('CA Jour', caStr, caCol, '#f9fafb', (d.ca&&d.ca!==0)?iconeEv(d.ev)+' '+(d.ev>=0?'+':'')+d.ev.toFixed(1)+'% vs N-1':'')+
-        dCell('Écart Budget', budStr, budCol, budBg, (d.bud!==0)?((d.bud>0?'au-dessus du budget':'sous le budget')):'')+
-        dCell('Taux Marge', txStr, txCol, '#f9fafb', txNote)+
-        dCell('Diff Marge N-1', dmStr, dmCol, dmBg, dmNote)+
-        dCell('Rang National', rangStr, '#003d8f', rangBg, (d.rang>=1)?((d.er!==0)?erStr+' vs hier':'stable'):'')+
-      '</div>'+
-      // Tableau de détail
-      '<div style="padding:0 14px 12px">'+
-        '<table style="width:100%;border-collapse:collapse">'+
-          '<thead><tr style="background:#f8fafc">'+
-            '<th style="padding:7px 12px;font-size:11px;font-weight:700;text-transform:uppercase;color:#6b7280;text-align:left;border-bottom:2px solid #e5e7eb">Indicateur</th>'+
-            '<th style="padding:7px 12px;font-size:11px;font-weight:700;text-transform:uppercase;color:#6b7280;text-align:right;border-bottom:2px solid #e5e7eb">Valeur</th>'+
-            '<th style="padding:7px 12px;font-size:11px;font-weight:700;text-transform:uppercase;color:#6b7280;text-align:left;border-bottom:2px solid #e5e7eb">Contexte</th>'+
-          '</tr></thead>'+
-          '<tbody>'+
-            dRow('Chiffre d\'Affaires Jour', caStr, caCol, 'extrait PDF Performances')+
-            dRow('Évolution vs N-1', evStr, evCol, (d.ev>0?'progression':'')+(d.ev<0?'recul':'')+(d.ev===0?'stable':''))+
-            dRow('Écart au Budget', budStr, budCol, (d.bud>0?'surplus':'')+(d.bud<0?'déficit':'')+(d.bud===0?'atteint':'')+' / extrait PDF Performances')+
-            dRow('Taux de Marge', txStr, txCol, 'extrait PDF Performances')+
-            dRow('Différentiel Marge N-1', dmStr, dmCol, (d.dm>0?'amélioration marge':'')+(d.dm<0?'dégradation marge':'')+(d.dm===0?'stable':''))+
-            dRow('Rang National', (d.rang>=1?'Rang '+d.rang+'  /  '+erStr:'–'), erCol, (d.er>0?'progression nationale':(d.er<0?'régression nationale':'stable')))+
-          '</tbody>'+
-        '</table>'+
-      '</div>'+
-    '</div>';
-
-  // ─── CARD 2 : STOCKS NÉGATIFS & RUPTURES ────────────────────────────────────
-  // Seuils :  rupt>50 → rouge / rupt>0 → orange / 0 → vert
-  //           stk>20  → rouge / stk>0  → orange / 0 → vert
-  var ruptStr  = (d.rupt!==undefined) ? d.rupt.toString() : '–';
-  var ruptCol  = colRupt(d.rupt||0);
-  var ruptBgC  = colBgRupt(d.rupt||0);
-  var ruptLib  = d.rupt>50?'⚠ Situation critique':d.rupt>0?'⚡ À traiter en priorité':'✓ Aucune rupture détectée';
-
-  var stkStr   = (d.stk!==undefined) ? d.stk.toString() : '–';
-  var stkCol   = colStk(d.stk||0);
-  var stkBgC   = colBgStk(d.stk||0);
-  var stkLib   = d.stk>20?'⚠ Nombreux stocks négatifs':d.stk>0?'⚡ Stocks négatifs présents':'✓ Aucun stock négatif';
-
-  // Score de disponibilité : si les 2 sont à 0 → 100%, sinon calcul estimé
-  var dispoScore, dispoCol, dispoBg;
-  if(!d.rupt && !d.stk){
-    dispoScore='100%'; dispoCol='#16a34a'; dispoBg='#dcfce7';
-  } else {
-    // Estimation pénalisante : chaque rupture compte double (impact CA direct)
-    var pen=Math.min(100, (d.rupt||0)*2 + (d.stk||0));
-    dispoScore=Math.max(0,100-pen)+'%';
-    dispoCol=pen>30?'#dc2626':pen>10?'#ea580c':'#d97706';
-    dispoBg=pen>30?'#fee2e2':pen>10?'#fff7ed':'#fffbeb';
-  }
-
-  var stockCard =
-    '<div class="card" style="margin-bottom:12px">'+
-      '<div class="ch al" style="background:#fff7ed;color:#9a3412;border-bottom:1px solid #fed7aa">'+
-        '📦 Disponibilité Produit — Stocks & Ruptures'+
-      '</div>'+
-      '<div style="padding:12px 14px 8px;display:flex;flex-wrap:wrap;gap:8px">'+
-        dCell('Ruptures Catalogue', ruptStr, ruptCol, ruptBgC, ruptLib)+
-        dCell('Stocks Négatifs', stkStr, stkCol, stkBgC, stkLib)+
-        dCell('Score Dispo Estimé', dispoScore, dispoCol, dispoBg, 'calculé sur ruptures + stocks négatifs')+
-      '</div>'+
-      '<div style="padding:0 14px 12px">'+
-        '<table style="width:100%;border-collapse:collapse">'+
-          '<thead><tr style="background:#f8fafc">'+
-            '<th style="padding:7px 12px;font-size:11px;font-weight:700;text-transform:uppercase;color:#6b7280;text-align:left;border-bottom:2px solid #e5e7eb">Indicateur</th>'+
-            '<th style="padding:7px 12px;font-size:11px;font-weight:700;text-transform:uppercase;color:#6b7280;text-align:right;border-bottom:2px solid #e5e7eb">Valeur</th>'+
-            '<th style="padding:7px 12px;font-size:11px;font-weight:700;text-transform:uppercase;color:#6b7280;text-align:left;border-bottom:2px solid #e5e7eb">Seuil / Interprétation</th>'+
-          '</tr></thead>'+
-          '<tbody>'+
-            dRow('Ruptures Catalogue', ruptStr+' référence'+(d.rupt>1?'s':''), ruptCol, (d.rupt>50?'Seuil critique >50':d.rupt>0?'Seuil alerte >0':'Seuil normal = 0'))+
-            dRow('Stocks Négatifs', stkStr+' ligne'+(d.stk>1?'s':''), stkCol, (d.stk>20?'Seuil critique >20':d.stk>0?'Seuil alerte >0':'Seuil normal = 0'))+
-            dRow('Impact CA Estimé', d.rupt>0?(d.rupt*0.12).toFixed(1)+' K€ potentiels manquants':'impact nul', d.rupt>0?'#dc2626':'#16a34a', 'estimation 0,12 K€/rupture — indicatif')+
-            dRow('Score Disponibilité', dispoScore, dispoCol, 'calculé sur base ruptures×2 + stocks négatifs')+
-          '</tbody>'+
-        '</table>'+
-      '</div>'+
-    '</div>';
-
-  // ─── CARD 3 (conditionnelle) : CLASSEMENT RÉGION ─────────────────────────────
-  // Affichée uniquement si les données région correspondent au rayon sélectionné
-  var regCard='';
-  if(RAYON_PDF_COMPAR===k && REG[k] && REG[k].mags.length){
-    var reg=REG[k];
-    // Retrouver la position de Narbonne dans le classement
-    var meReg=null;
-    reg.mags.forEach(function(mg){ if(mg.isMe) meReg=mg; });
-    var nbMags=reg.mags.length;
-
-    var regPosStr  = meReg ? meReg.rang+' / '+nbMags : '–';
-    var regPosCol  = meReg ? (meReg.rang<=3?'#854d0e':meReg.rang<=Math.round(nbMags/2)?'#16a34a':'#dc2626') : '#6b7280';
-    var regPosNote = meReg ? (meReg.rang<=3?'🥇 Podium DTF':meReg.rang<=Math.round(nbMags/2)?'au-dessus de la médiane':'en-dessous de la médiane') : '';
-    var dtfCA  = reg.dtf.ca ? reg.dtf.ca.toFixed(1)+' K€' : '–';
-    var dtfEv  = reg.dtf.ev ? fmtV(reg.dtf.ev,1,'%') : '–';
-    var dtfDeb = reg.dtf.deb ? reg.dtf.deb.toLocaleString('fr-FR') : '–';
-    var dtfPan = reg.dtf.pan ? reg.dtf.pan.toFixed(1)+' €' : '–';
-
-    var meCA   = meReg ? meReg.ca.toFixed(1)+' K€' : '–';
-    var meEv   = meReg ? fmtV(meReg.ev,1,'%') : '–';
-    var meDeb  = meReg ? meReg.deb.toLocaleString('fr-FR') : '–';
-    var mePan  = meReg ? meReg.pan.toFixed(1)+' €' : '–';
-    var meEvCol = meReg ? colEv(meReg.ev) : '#6b7280';
-
-    // Voisins de classement (mag avant et après Narbonne)
-    var voisins='';
-    if(meReg){
-      var idx=reg.mags.findIndex(function(mg){return mg.isMe;});
-      if(idx>0){ var av=reg.mags[idx-1]; voisins+='<span style="color:#9ca3af;font-size:11px">Rang '+(meReg.rang-1)+' : '+av.nom+' ('+av.ca.toFixed(1)+' K€ / '+fmtV(av.ev,1,'%')+')</span><br>'; }
-      voisins+='<span style="color:#003d8f;font-weight:700;font-size:12px">► Rang '+meReg.rang+' : NARBONNE — '+meCA+' / '+meEv+'</span><br>';
-      if(idx<reg.mags.length-1){ var ap=reg.mags[idx+1]; voisins+='<span style="color:#9ca3af;font-size:11px">Rang '+(meReg.rang+1)+' : '+ap.nom+' ('+ap.ca.toFixed(1)+' K€ / '+fmtV(ap.ev,1,'%')+')</span>'; }
-    }
-
-    regCard =
-      '<div class="card full" style="margin-bottom:12px">'+
-        '<div class="ch rg">🌍 Classement Régional DTF SUD EST — Rayon '+m.n+' '+m.nom+'</div>'+
-        '<div style="padding:12px 14px 8px;display:flex;flex-wrap:wrap;gap:8px">'+
-          dCell('Position Narbonne', regPosStr, regPosCol, '#fdf4ff', regPosNote)+
-          dCell('CA DTF', dtfCA, '#003d8f', '#eff6ff', dtfEv+' vs N-1')+
-          dCell('Débits DTF', dtfDeb, '#003d8f', '#eff6ff', 'nombre de passages')+
-          dCell('Panier DTF', dtfPan, '#003d8f', '#eff6ff', 'panier moyen')+
-        '</div>'+
-        '<div style="padding:0 14px 8px">'+
-          '<table style="width:100%;border-collapse:collapse">'+
-            '<thead><tr style="background:#f8fafc">'+
-              '<th style="padding:7px 12px;font-size:11px;font-weight:700;text-transform:uppercase;color:#6b7280;text-align:left;border-bottom:2px solid #e5e7eb">Référence</th>'+
-              '<th style="padding:7px 12px;font-size:11px;font-weight:700;text-transform:uppercase;color:#6b7280;text-align:right;border-bottom:2px solid #e5e7eb">CA</th>'+
-              '<th style="padding:7px 12px;font-size:11px;font-weight:700;text-transform:uppercase;color:#6b7280;text-align:right;border-bottom:2px solid #e5e7eb">Évol</th>'+
-              '<th style="padding:7px 12px;font-size:11px;font-weight:700;text-transform:uppercase;color:#6b7280;text-align:right;border-bottom:2px solid #e5e7eb">Débits</th>'+
-              '<th style="padding:7px 12px;font-size:11px;font-weight:700;text-transform:uppercase;color:#6b7280;text-align:right;border-bottom:2px solid #e5e7eb">Panier</th>'+
-            '</tr></thead>'+
-            '<tbody>'+
-              '<tr style="background:#eff6ff"><td style="padding:7px 12px;font-size:12px;font-weight:700;color:#1e40af;border-bottom:1px solid #dbeafe">DTF SUD EST (référence)</td>'+
-              '<td style="padding:7px 12px;font-size:13px;font-weight:700;color:#003d8f;text-align:right;border-bottom:1px solid #dbeafe">'+dtfCA+'</td>'+
-              '<td style="padding:7px 12px;font-size:13px;font-weight:700;color:'+colEv(reg.dtf.ev||0)+';text-align:right;border-bottom:1px solid #dbeafe">'+dtfEv+'</td>'+
-              '<td style="padding:7px 12px;font-size:13px;font-weight:700;color:#003d8f;text-align:right;border-bottom:1px solid #dbeafe">'+dtfDeb+'</td>'+
-              '<td style="padding:7px 12px;font-size:13px;font-weight:700;color:#003d8f;text-align:right;border-bottom:1px solid #dbeafe">'+dtfPan+'</td></tr>'+
-              (meReg?'<tr style="background:#fef9c3"><td style="padding:7px 12px;font-size:12px;font-weight:700;color:#854d0e;border-bottom:1px solid #fde68a">🏪 Narbonne HF7152 (rang '+meReg.rang+')</td>'+
-              '<td style="padding:7px 12px;font-size:13px;font-weight:700;color:'+meEvCol+';text-align:right;border-bottom:1px solid #fde68a">'+meCA+'</td>'+
-              '<td style="padding:7px 12px;font-size:13px;font-weight:700;color:'+meEvCol+';text-align:right;border-bottom:1px solid #fde68a">'+meEv+'</td>'+
-              '<td style="padding:7px 12px;font-size:13px;font-weight:700;color:#854d0e;text-align:right;border-bottom:1px solid #fde68a">'+meDeb+'</td>'+
-              '<td style="padding:7px 12px;font-size:13px;font-weight:700;color:#854d0e;text-align:right;border-bottom:1px solid #fde68a">'+mePan+'</td></tr>':'') +
-            '</tbody>'+
-          '</table>'+
-        '</div>'+
-        (voisins?'<div style="padding:6px 14px 12px;border-top:1px solid #e9d5ff">'+
-          '<div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#6b7280;margin-bottom:6px">Voisins de classement</div>'+
-          voisins+
-        '</div>':'')+
-      '</div>';
-  }
-
-  // ─── CARD 4 : CONSIGNES MANUELLES (si saisies) ────────────────────────────────
-  var manCard='';
-  var hasMan=mOp1||mOp2||mCl;
-  if(hasMan){
-    var manItems='';
-    if(mOp1) manItems+=mR(mOp1,false);
-    if(mOp2) manItems+=mR(mOp2,false);
-    if(mCl)  manItems+=mR(mCl,true);
-    manCard=
-      '<div class="g2" style="margin-bottom:0">'+
-        '<div class="card full"><div class="ch rg" style="background:#faf5ff;color:#6b21a8;border-bottom:1px solid #e9d5ff">✏️ Consignes Manuelles du Jour</div>'+
-          '<div class="clist">'+manItems+'</div>'+
-        '</div>'+
-      '</div>';
-  }
+  var opH=c.op.map(function(t,i){return opR(t,i+1);}).join('');
+  if(mOp1) opH+=mR(mOp1,false);
+  if(mOp2) opH+=mR(mOp2,false);
+  var clH=c.cl.map(function(t,i){return clR(t,i+1);}).join('');
+  if(mCl) clH+=mR(mCl,true);
 
   var erl=(d.er>0?'+':'')+d.er+' place'+(Math.abs(d.er)>1?'s':'');
 
@@ -1120,11 +928,11 @@ function genBrief(){
       '<div class="ch al">⚡ Points d\'attention du jour</div>'+
       '<div class="alerts">'+al.map(function(a){return '<span class="chip '+a.t+'">'+a.l+'</span>';}).join('')+'</div>'+
     '</div>'+
-    perfCard+
-    stockCard+
+    '<div class="g2">'+
+      '<div class="card"><div class="ch op">⚙️ Consignes Opérationnelles</div><div class="clist">'+opH+'</div></div>'+
+      '<div class="card"><div class="ch cl">🧹 Propreté & Tenue du Rayon</div><div class="clist">'+clH+'</div></div>'+
+    '</div>'+
     '<div id="reg-s" style="display:none"></div>'+
-    regCard+
-    (manCard?manCard:'')+
     buildClosing(d)+
     '<div class="bfoot">Brief généré — HF7152 Narbonne — '+(DATE_STR||new Date().toLocaleDateString('fr-FR'))+' — Confidentiel Carrefour</div>';
 
@@ -1225,129 +1033,76 @@ function majBtnMan(){
 }
 
 // ═══════════════════════════════════════════════════
-// DEBUG — analyse parsers PDF
+// MODIFIER CONSIGNES (one-shot, templates préservés)
 // ═══════════════════════════════════════════════════
-function ouvDebug(){
-  var h='';
+var GRP={
+  pgc:[{lb:'🛒 PGC — Opérationnel',co:'#003d8f',ks:['pgc_o1','pgc_o2','pgc_o3'],ns:['Consigne 1','Consigne 2','Consigne 3']},
+       {lb:'🛒 PGC — Propreté',co:'#16a34a',ks:['pgc_c1','pgc_c2','pgc_c3'],ns:['Propreté 1','Propreté 2','Propreté 3']}],
+  pls:[{lb:'❄️ PLS — Opérationnel',co:'#003d8f',ks:['pls_o1','pls_o2','pls_o3'],ns:['Consigne 1','Consigne 2','Consigne 3']},
+       {lb:'❄️ PLS — Propreté',co:'#16a34a',ks:['pls_c1','pls_c2','pls_c3'],ns:['Propreté 1','Propreté 2','Propreté 3']}],
+  pft_tb:[{lb:'🥩 PFT Opérationnel (Boucherie/Poissonnerie/Charcuterie)',co:'#003d8f',ks:['pft_tb','pft_o2','pft_o3'],ns:['Traçabilité','Consigne 2','Consigne 3']},
+          {lb:'🥩 PFT — Propreté',co:'#16a34a',ks:['pft_c1','pft_c2','pft_c3'],ns:['Propreté 1','Propreté 2','Propreté 3']}],
+  pft_fl:[{lb:'🥬 PFT Opérationnel (Fruits & Légumes)',co:'#003d8f',ks:['pft_fl','pft_o2','pft_o3'],ns:['Origine','Consigne 2','Consigne 3']},
+          {lb:'🥬 PFT — Propreté',co:'#16a34a',ks:['pft_c1','pft_c2','pft_c3'],ns:['Propreté 1','Propreté 2','Propreté 3']}],
+  pft_bo:[{lb:'🥐 PFT Opérationnel (Boulangerie)',co:'#003d8f',ks:['pft_bo','pft_o2','pft_o3'],ns:['Allergènes','Consigne 2','Consigne 3']},
+          {lb:'🥐 PFT — Propreté',co:'#16a34a',ks:['pft_c1','pft_c2','pft_c3'],ns:['Propreté 1','Propreté 2','Propreté 3']}],
+  pft_dl:[{lb:'🐟 PFT Opérationnel (Autres PFT)',co:'#003d8f',ks:['pft_dl','pft_o2','pft_o3'],ns:['DLC','Consigne 2','Consigne 3']},
+          {lb:'🐟 PFT — Propreté',co:'#16a34a',ks:['pft_c1','pft_c2','pft_c3'],ns:['Propreté 1','Propreté 2','Propreté 3']}],
+  na:[{lb:'📦 Non Alim — Opérationnel',co:'#003d8f',ks:['na_o1','na_o2','na_o3'],ns:['Consigne 1','Consigne 2','Consigne 3']},
+      {lb:'📦 Non Alim — Propreté',co:'#16a34a',ks:['na_c1','na_c2','na_c3'],ns:['Propreté 1','Propreté 2','Propreté 3']}]
+};
 
-  // ── Section 1 : données chiffrées extraites par rayon ──────────────────────
-  h+='<div style="background:#1e293b;color:#e2e8f0;padding:10px 14px;border-radius:6px;margin-bottom:10px">'+
-    '<div style="font-size:13px;font-weight:700;color:#94a3b8;margin-bottom:8px">① DONNÉES PAR RAYON (D[]) — PDF Performances + Classement</div>';
-  var keys=Object.keys(D).sort();
-  var hasData=false;
-  keys.forEach(function(k){
-    var d=D[k];
-    if(d.ca||d.ev||d.rang){
-      hasData=true;
-      var m=META[k]?META[k].nom:k;
-      h+='<div style="margin-bottom:3px"><span style="color:#60a5fa;min-width:70px;display:inline-block">'+k+' '+m+'</span> '+
-        '<span style="color:#86efac">CA='+d.ca.toFixed(2)+'</span> '+
-        '<span style="color:#fde68a">ev='+d.ev.toFixed(1)+'%</span> '+
-        '<span style="color:#c4b5fd">bud='+d.bud.toFixed(1)+'</span> '+
-        '<span style="color:#67e8f9">taux='+d.taux.toFixed(2)+'%</span> '+
-        '<span style="color:#f9a8d4">dm='+d.dm.toFixed(2)+'</span> '+
-        '<span style="color:#fb923c">rang='+d.rang+' er='+d.er+'</span> '+
-        '<span style="color:#fca5a5">rupt='+d.rupt+' stk='+d.stk+'</span>'+
-      '</div>';
-    }
+function getGrp(k){
+  var t=META[k]?META[k].t:'na';
+  if(t==='pgc') return GRP.pgc;
+  if(t==='pls') return GRP.pls;
+  if(t==='pft'){
+    if(k==='20'||k==='21'||k==='24') return GRP.pft_tb;
+    if(k==='22') return GRP.pft_fl;
+    if(k==='23') return GRP.pft_bo;
+    return GRP.pft_dl;
+  }
+  return GRP.na;
+}
+
+function ouvEdit(){
+  var k=document.getElementById('sel').value; if(!k) return;
+  var mm=META[k], grps=getGrp(k);
+  var h='<div style="background:#eff6ff;border-radius:7px;padding:9px 13px;margin-bottom:12px;font-size:13px;color:#1e40af">'+
+    '📌 Consignes pour <strong>Rayon '+mm.n+' — '+mm.nom+'</strong>. Modifiables pour le prochain brief uniquement. Les templates originaux sont préservés.</div>';
+  grps.forEach(function(g){
+    h+='<div class="eg"><div class="egh" style="background:'+g.co+'18;color:'+g.co+'">'+g.lb+'</div><div class="egb">';
+    g.ks.forEach(function(key,i){
+      var val=(SHOT&&key in SHOT) ? SHOT[key] : (CO[key]||'');
+      var mod=(SHOT&&key in SHOT);
+      h+='<div><div class="flbl">'+g.ns[i]+(mod?'<span class="modb">MODIFIÉ</span>':'')+'</div>'+
+         '<textarea data-k="'+key+'" rows="3" style="border-color:'+(mod?'#3b82f6':'var(--border)')+'">'+esc(val)+'</textarea></div>';
+    });
+    h+='</div></div>';
   });
-  if(!hasData) h+='<div style="color:#f87171">⚠ Aucune donnée — chargez le PDF Performances</div>';
-  h+='</div>';
+  document.getElementById('edit-c').innerHTML=h;
+  document.getElementById('ov-edt').classList.add('open');
+}
 
-  // ── Section 2 : données DTF et magasins du PDF comparaison ─────────────────
-  if(RAYON_PDF_COMPAR && REG[RAYON_PDF_COMPAR]){
-    var reg=REG[RAYON_PDF_COMPAR];
-    h+='<div style="background:#1e293b;color:#e2e8f0;padding:10px 14px;border-radius:6px;margin-bottom:10px">'+
-      '<div style="font-size:13px;font-weight:700;color:#94a3b8;margin-bottom:8px">② DONNÉES RÉGION — Rayon détecté : '+RAYON_PDF_COMPAR+' ('+META[RAYON_PDF_COMPAR].nom+')</div>'+
-      '<div style="margin-bottom:6px;color:#fde68a">DTF SUD EST → ca='+reg.dtf.ca+' ev='+reg.dtf.ev+' deb='+reg.dtf.deb+' pan='+reg.dtf.pan+'</div>';
-    if(reg.mags.length){
-      reg.mags.forEach(function(mg){
-        h+='<div style="color:'+(mg.isMe?'#86efac':'#cbd5e1')+'">'+(mg.isMe?'★ ':'')+
-          'rang='+mg.rang+' nom="'+mg.nom+'" ca='+mg.ca+' ev='+mg.ev+'% deb='+mg.deb+' pan='+mg.pan+'</div>';
-      });
-    } else {
-      h+='<div style="color:#f87171">⚠ Aucun magasin parsé</div>';
-    }
-    h+='</div>';
-  } else {
-    h+='<div style="background:#1e293b;color:#f87171;padding:10px 14px;border-radius:6px;margin-bottom:10px">② PDF Comparaison : non chargé ou rayon non détecté</div>';
-  }
+function appEdit(){
+  var tas=document.querySelectorAll('#edit-c textarea');
+  var shot={}, has=false;
+  tas.forEach(function(ta){
+    var k=ta.getAttribute('data-k');
+    var v=ta.value.trim();
+    if(v !== (CO[k]||'')){ shot[k]=v; has=true; }
+  });
+  SHOT=has?shot:null;
+  majBtnEdit();
+  fov('ov-edt');
+}
 
-  // ── Section 3 : lignes brutes du PDF comparaison ────────────────────────────
-  if(DBG_TXT_COMPAR){
-    h+='<div style="background:#1e293b;color:#e2e8f0;padding:10px 14px;border-radius:6px;margin-bottom:10px">'+
-      '<div style="font-size:13px;font-weight:700;color:#94a3b8;margin-bottom:8px">③ LIGNES BRUTES PDF COMPARAISON</div>'+
-      '<div style="font-size:11px;color:#94a3b8;margin-bottom:6px">Cliquer sur une ligne pour copier. Les lignes contenant des chiffres sont surlignées.</div>';
-    var lignes=DBG_TXT_COMPAR.split('\n');
-    var shown=0;
-    lignes.forEach(function(l,i){
-      if(!l.trim()) return;
-      if(shown>300) return; // limiter l'affichage
-      shown++;
-      var hasNums=/\d/.test(l);
-      var isDtf=/DTF\s+SUD\s+EST/i.test(l);
-      var isNarb=/NARBONNE/i.test(l);
-      var bg=isDtf?'#1d4ed8':isNarb?'#166534':hasNums?'#292524':'transparent';
-      var col=isDtf?'#bfdbfe':isNarb?'#bbf7d0':hasNums?'#fed7aa':'#64748b';
-      h+='<div onclick="navigator.clipboard&&navigator.clipboard.writeText(this.dataset.l)" data-l="'+esc(l)+
-        '" title="Cliquer pour copier" style="cursor:pointer;background:'+bg+';color:'+col+
-        ';padding:1px 4px;border-radius:2px;margin:1px 0;white-space:pre-wrap;word-break:break-all">'+
-        '<span style="color:#475569;margin-right:8px;user-select:none">'+(i+1)+'</span>'+esc(l)+'</div>';
-    });
-    if(lignes.length>300) h+='<div style="color:#f87171;margin-top:6px">… '+lignes.length+' lignes au total (300 affichées)</div>';
-    h+='</div>';
-
-    // ── Section 4 : analyse automatique DTF ───────────────────────────────────
-    h+='<div style="background:#1e293b;color:#e2e8f0;padding:10px 14px;border-radius:6px;margin-bottom:10px">'+
-      '<div style="font-size:13px;font-weight:700;color:#94a3b8;margin-bottom:8px">④ ANALYSE DTF — Lignes candidates et nums extraits</div>';
-    DBG_TXT_COMPAR.split('\n').forEach(function(l){
-      if(!/DTF/i.test(l)) return;
-      var ns=getNums(l);
-      h+='<div style="margin-bottom:6px">'+
-        '<div style="color:#bfdbfe;white-space:pre-wrap">Ligne brute : '+esc(l)+'</div>'+
-        '<div style="color:#fde68a">getNums() → ['+ns.join(', ')+']</div>'+
-        '<div style="color:#86efac">Interprétation attendue : ns[0]=CA ns[1]=évol% ns[2]=débits ns[3]=évol_deb% ns[4]=panier</div>'+
-      '</div>';
-    });
-    h+='</div>';
-
-    // ── Section 5 : analyse lignes magasins ───────────────────────────────────
-    h+='<div style="background:#1e293b;color:#e2e8f0;padding:10px 14px;border-radius:6px">'+
-      '<div style="font-size:13px;font-weight:700;color:#94a3b8;margin-bottom:8px">⑤ ANALYSE LIGNES MAGASINS — Regex et extraction deb/pan</div>'+
-      '<div style="font-size:11px;color:#94a3b8;margin-bottom:6px">Lignes qui matchent le pattern nom+rang+CA+évol%</div>';
-    var RE=/^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9\s\-\'\.]{1,35}?)\s+(\d{1,2})\s+([\d,]+)\s+([-\d,]+)%/;
-    DBG_TXT_COMPAR.split('\n').forEach(function(ligne){
-      ligne=ligne.trim();
-      if(!ligne) return;
-      var lu=ligne.toUpperCase();
-      if(EXCL_C.some(function(ex){return lu.indexOf(ex)!==-1;})) return;
-      if(!/^[A-Za-zÀ-ÿ]/.test(ligne)) return;
-      var m=ligne.match(RE);
-      if(!m) return;
-      var rang=parseInt(m[2]), ca=pN(m[3]);
-      if(rang<1||rang>40||ca<=0||ca>60||m[1].trim().length<3) return;
-      var suite=ligne.substring(m[0].length);
-      var sn=getNums(suite);
-      var isNarb=/NARBONNE/i.test(m[1]);
-      h+='<div style="margin-bottom:8px;border-left:2px solid '+(isNarb?'#22c55e':'#475569')+';padding-left:8px">'+
-        '<div style="color:'+(isNarb?'#86efac':'#94a3b8')+'">Ligne: '+esc(ligne)+'</div>'+
-        '<div style="color:#e2e8f0">nom="'+m[1].trim()+'" rang='+rang+' ca='+ca+' ev='+pN(m[4])+'%</div>'+
-        '<div style="color:#fde68a">suite → getNums=['+sn.join(', ')+']</div>'+
-        (function(){
-          var deb=0,pan=0;
-          if(sn.length>=2&&(sn[0]===1||sn[0]===2)&&sn[1]>=10&&sn[1]<=999){deb=sn[0]*1000+sn[1];pan=premierEntre(sn,2,1,15);}
-          else{deb=Math.round(Math.abs(sn[0]));pan=(sn.length>=3&&sn[2]>=1&&sn[2]<=15)?sn[2]:premierEntre(sn,1,1,15);}
-          return '<div style="color:#fb923c">deb='+deb+' pan='+pan+'</div>';
-        })()+
-      '</div>';
-    });
-    h+='</div>';
-  } else {
-    h+='<div style="background:#1e293b;color:#64748b;padding:10px 14px;border-radius:6px">③④⑤ Chargez le PDF Comparaison pour voir les données brutes</div>';
-  }
-
-  document.getElementById('dbg-c').innerHTML=h;
-  document.getElementById('ov-dbg').classList.add('open');
+function majBtnEdit(){
+  var b=document.getElementById('btn-edt'); if(!b) return;
+  b.disabled=!document.getElementById('sel').value;
+  var has=SHOT&&Object.keys(SHOT).length>0;
+  b.classList.toggle('on',has);
+  b.textContent=has?'⚙️ Consignes à appliquer ●':'⚙️ Modifier consignes';
 }
 
 // ═══════════════════════════════════════════════════
