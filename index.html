@@ -1229,6 +1229,22 @@ function imprimer(){
   var regS=document.getElementById('reg-s');
   var hasReg=regS&&regS.style.display!=='none'&&regS.innerHTML.trim()!=='';
 
+  // ── POINT 2 : cloner le HTML et déplacer #reg-s juste avant .closing ──
+  var printDiv=document.createElement('div');
+  printDiv.innerHTML=c.innerHTML;
+  if(hasReg){
+    var regEl=printDiv.querySelector('#reg-s');
+    var closingEl=printDiv.querySelector('.closing');
+    if(regEl&&closingEl){
+      // Retirer reg-s de sa position actuelle
+      regEl.parentNode.removeChild(regEl);
+      // Le remettre visible juste avant .closing
+      regEl.style.display='block';
+      closingEl.parentNode.insertBefore(regEl,closingEl);
+    }
+  }
+  var printHTML=printDiv.innerHTML;
+
   var iframe=document.createElement('iframe');
   iframe.style.cssText='position:fixed;top:0;left:0;width:0;height:0;border:none;visibility:hidden';
   document.body.appendChild(iframe);
@@ -1238,11 +1254,6 @@ function imprimer(){
   doc.write(
     '<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><title>Brief</title>'+
     '<style>'+st+
-    // Page 1 : A4 paysage, marges réduites → plus de place → police plus lisible
-    '@page p1{size:A4 landscape;margin:7mm}'+
-    // Page 2 (classement régional) : A4 paysage aussi
-    '@page p2{size:A4 landscape;margin:7mm}'+
-    // Fallback général
     '@page{size:A4 landscape;margin:7mm}'+
     'html,body{margin:0;padding:0;background:#fff}'+
     'body{padding:4px;box-sizing:border-box}'+
@@ -1250,24 +1261,28 @@ function imprimer(){
     '#brief{display:block!important}'+
     '.wrap{max-width:100%!important;padding:0!important}'+
     '*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}'+
-    // Page 1 : police augmentée pour lisibilité
+    // Police générale page 1
     '#brief-c>*:not(#reg-s){font-size:113%}'+
     'table{font-size:12px}'+
     'th,td{padding:5px 7px!important}'+
-    '.kv{font-size:17px!important}'+
-    '.kl{font-size:10px!important}'+
-    '.kpi{padding:7px 10px!important;min-width:82px!important}'+
-    '.b-title{font-size:22px!important}'+
+    // POINT 1 : bandeau KPI agrandi significativement
+    '.b-hdr{padding:18px 22px!important;margin-bottom:12px!important}'+
+    '.b-title{font-size:26px!important}'+
+    '.kpis{gap:10px!important}'+
+    '.kpi{padding:12px 14px!important;min-width:96px!important}'+
+    '.kv{font-size:22px!important;font-weight:800!important}'+
+    '.kl{font-size:11px!important;margin-top:4px!important}'+
+    // Autres blocs
     '.ch{font-size:13px!important}'+
     '.chip{font-size:12px!important;padding:4px 10px!important}'+
     '.ct{font-size:13px!important}'+
-    // Coupure de page : juste avant le bloc classement régional
-    (hasReg?'#reg-s{page-break-before:always!important;break-before:page!important;display:block!important}':'#reg-s{display:none!important}')+
-    // Empêcher les coupures intempestives sur page 1
+    // Empêcher coupures sur page 1
     '.b-hdr,.card,.closing{page-break-inside:avoid;break-inside:avoid}'+
     '.b-hdr,.closing{-webkit-print-color-adjust:exact;print-color-adjust:exact}'+
+    // POINT 3 : classement régional entier sur une seule page, sans coupure
+    (hasReg?'#reg-s{page-break-before:always!important;break-before:page!important;display:block!important;page-break-inside:avoid!important;break-inside:avoid!important}#reg-s .card{page-break-inside:avoid!important;break-inside:avoid!important}#reg-s table{page-break-inside:avoid!important;break-inside:avoid!important}#reg-s tr{page-break-inside:avoid!important;break-inside:avoid!important}':'#reg-s{display:none!important}')+
     '</style></head>'+
-    '<body><div style="width:100%">'+c.innerHTML+'</div></body></html>'
+    '<body><div style="width:100%">'+printHTML+'</div></body></html>'
   );
   doc.close();
 
