@@ -1236,9 +1236,7 @@ function imprimer(){
     var regEl=printDiv.querySelector('#reg-s');
     var closingEl=printDiv.querySelector('.closing');
     if(regEl&&closingEl){
-      // Retirer reg-s de sa position actuelle
       regEl.parentNode.removeChild(regEl);
-      // Le remettre visible juste avant .closing
       regEl.style.display='block';
       closingEl.parentNode.insertBefore(regEl,closingEl);
     }
@@ -1272,15 +1270,18 @@ function imprimer(){
     '.kpi{padding:12px 14px!important;min-width:96px!important}'+
     '.kv{font-size:22px!important;font-weight:800!important}'+
     '.kl{font-size:11px!important;margin-top:4px!important}'+
-    // Autres blocs
     '.ch{font-size:13px!important}'+
     '.chip{font-size:12px!important;padding:4px 10px!important}'+
     '.ct{font-size:13px!important}'+
-    // Empêcher coupures sur page 1
-    '.b-hdr,.card,.closing{page-break-inside:avoid;break-inside:avoid}'+
+    // NE PAS bloquer les coupures sur .card et .closing → page 1 coule librement
+    // et le closing reste sur la même page que la grille
+    '.b-hdr{page-break-inside:avoid;break-inside:avoid}'+
     '.b-hdr,.closing{-webkit-print-color-adjust:exact;print-color-adjust:exact}'+
-    // POINT 3 : classement régional entier sur une seule page, sans coupure
-    (hasReg?'#reg-s{page-break-before:always!important;break-before:page!important;display:block!important;page-break-inside:avoid!important;break-inside:avoid!important}#reg-s .card{page-break-inside:avoid!important;break-inside:avoid!important}#reg-s table{page-break-inside:avoid!important;break-inside:avoid!important}#reg-s tr{page-break-inside:avoid!important;break-inside:avoid!important}':'#reg-s{display:none!important}')+
+    // POINT 3 : #reg-s entier (header + tableau) sur une seule page 2, sans coupure
+    (hasReg?
+      '#reg-s{page-break-before:always!important;break-before:page!important;display:block!important;page-break-inside:avoid!important;break-inside:avoid!important}'+
+      '#reg-s *{page-break-inside:avoid!important;break-inside:avoid!important}'
+    :'#reg-s{display:none!important}')+
     '</style></head>'+
     '<body><div style="width:100%">'+printHTML+'</div></body></html>'
   );
