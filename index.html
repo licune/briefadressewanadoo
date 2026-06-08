@@ -1225,6 +1225,10 @@ function imprimer(){
   var st='';
   document.querySelectorAll('style').forEach(function(s){st+=s.innerHTML;});
 
+  // Détecter si le classement régional est affiché
+  var regS=document.getElementById('reg-s');
+  var hasReg=regS&&regS.style.display!=='none'&&regS.innerHTML.trim()!=='';
+
   var iframe=document.createElement('iframe');
   iframe.style.cssText='position:fixed;top:0;left:0;width:0;height:0;border:none;visibility:hidden';
   document.body.appendChild(iframe);
@@ -1234,13 +1238,33 @@ function imprimer(){
   doc.write(
     '<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><title>Brief</title>'+
     '<style>'+st+
-    '@page{size:A4 portrait;margin:8mm}'+
-    'html,body{width:210mm;margin:0;padding:0;background:#fff}'+
-    'body{padding:6px;box-sizing:border-box}'+
+    // Page 1 : A4 paysage, marges réduites → plus de place → police plus lisible
+    '@page p1{size:A4 landscape;margin:7mm}'+
+    // Page 2 (classement régional) : A4 paysage aussi
+    '@page p2{size:A4 landscape;margin:7mm}'+
+    // Fallback général
+    '@page{size:A4 landscape;margin:7mm}'+
+    'html,body{margin:0;padding:0;background:#fff}'+
+    'body{padding:4px;box-sizing:border-box}'+
     '.ctrl,.ov{display:none!important}'+
     '#brief{display:block!important}'+
     '.wrap{max-width:100%!important;padding:0!important}'+
     '*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}'+
+    // Page 1 : police augmentée pour lisibilité
+    '#brief-c>*:not(#reg-s){font-size:113%}'+
+    'table{font-size:12px}'+
+    'th,td{padding:5px 7px!important}'+
+    '.kv{font-size:17px!important}'+
+    '.kl{font-size:10px!important}'+
+    '.kpi{padding:7px 10px!important;min-width:82px!important}'+
+    '.b-title{font-size:22px!important}'+
+    '.ch{font-size:13px!important}'+
+    '.chip{font-size:12px!important;padding:4px 10px!important}'+
+    '.ct{font-size:13px!important}'+
+    // Coupure de page : juste avant le bloc classement régional
+    (hasReg?'#reg-s{page-break-before:always!important;break-before:page!important;display:block!important}':'#reg-s{display:none!important}')+
+    // Empêcher les coupures intempestives sur page 1
+    '.b-hdr,.card,.closing{page-break-inside:avoid;break-inside:avoid}'+
     '.b-hdr,.closing{-webkit-print-color-adjust:exact;print-color-adjust:exact}'+
     '</style></head>'+
     '<body><div style="width:100%">'+c.innerHTML+'</div></body></html>'
