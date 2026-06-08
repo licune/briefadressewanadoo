@@ -91,40 +91,7 @@ textarea:focus{outline:none;border-color:var(--lblue)}
 .egh{padding:7px 12px;font-size:13px;font-weight:700}
 .egb{padding:12px;display:flex;flex-direction:column;gap:10px}
 .modb{background:#dbeafe;color:#1d4ed8;font-size:10px;padding:1px 5px;border-radius:3px}
-@media print{
-  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
-  .ctrl,.ov,.hdr{display:none!important}
-  #brief{display:block!important}
-  body{background:#fff;margin:0;padding:0}
-  .wrap{max-width:100%;padding:0;margin:0}
-  .b-hdr{padding:10px 14px;margin-bottom:8px;border-radius:6px}
-  .b-title{font-size:20px}
-  .kpi{padding:6px 8px;min-width:72px}
-  .kv{font-size:15px}
-  .kl{font-size:9px}
-  .g2{gap:8px;margin-bottom:8px}
-  .card{border-radius:6px}
-  .ch{padding:6px 12px;font-size:12px}
-  .clist{padding:7px 10px;gap:5px}
-  .ci{padding:6px 8px}
-  .ct{font-size:12px;line-height:1.4}
-  .alerts{padding:7px 10px;gap:4px}
-  .chip{font-size:11px;padding:3px 8px}
-  .closing{padding:10px 14px;margin-bottom:8px;border-radius:6px}
-  .cl-t{font-size:13px}.cl-s{font-size:11px}
-  .cl-ico{font-size:22px}
-  .bfoot{font-size:10px;padding:4px 0 8px}
-  table{font-size:10.5px}
-  th,td{padding:4px 5px!important}
-  #reg-s{page-break-before:always;break-before:page;display:block!important}
-  #reg-s .rtbl{font-size:11px}
-  #reg-s .rtbl th,#reg-s .rtbl td{padding:5px 8px}
-  .card{page-break-inside:avoid;break-inside:avoid}
-  .b-hdr{page-break-inside:avoid;break-inside:avoid}
-  .closing{page-break-inside:avoid;break-inside:avoid}
-  tr{page-break-inside:avoid;break-inside:avoid}
-  @page{size:A4 portrait;margin:10mm 10mm 8mm 10mm}
-}
+@media print{.ctrl,.ov{display:none!important}#brief{display:block!important}body{background:#fff}.b-hdr,.closing{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 </style>
 </head>
 <body>
@@ -172,7 +139,6 @@ textarea:focus{outline:none;border-color:var(--lblue)}
       </div>
       <button class="btn btn-blue" onclick="genBrief()">▶ Générer</button>
       <button class="btn btn-pur" id="btn-man" onclick="ouvMan()">✏️ Consignes manuelles</button>
-      <button class="btn btn-cyn" id="btn-edt" onclick="ouvEdit()" disabled>⚙️ Modifier consignes</button>
       <button class="btn btn-out" onclick="imprimer()">🖨️ Imprimer</button>
       <button class="btn btn-org" id="btn-reg" onclick="affReg()" disabled>🌍 Classement Région</button>
       <div class="stat" id="stat">Chargez les PDFs Darwin pour alimenter les données.</div>
@@ -372,13 +338,12 @@ function parserPerf(txt){
     }
 
     // Normalisation des colonnes optionnelles vides :
-    // Structure PDF : [num, CA, EVOL, BUD, Poids, PoidsCata, TAUX, DM, ...]
-    // PoidsCata (col5) peut être absent → 8 valeurs brutes → insérer 1 en pos 4 pour rétablir.
-    // Seuil <9 (non <10) : les rayons sans colonnes "Produits retirés" donnent 9 valeurs
-    // avec PoidsCata présent → ne pas insérer → ns[6]=TAUX ✓.
-    // Prouvé par debug sur PDF réel : 8X/40/45 ont 9 vals, while<10 insérait inutilement
-    // et décalait PoidsCata dans ns[6] au lieu de TAUX.
-    while(ns.length>3 && ns.length<9){ ns.splice(4,0,1); }
+    // Structure complète = 10 valeurs : [num, CA, EVOL, BUD, col4, col5, TAUX, DM, STK, RUPT]
+    // Les colonnes 4 et 5 (ex: Poids Cata) peuvent être vides n'importe quel jour
+    // et pour n'importe quel rayon → décalage de TAUX et DM.
+    // Correction : tant qu'il manque des colonnes, insérer 1 en position 4
+    // jusqu'à atteindre 10 valeurs → mapping ns[6]/ns[7] toujours correct.
+    while(ns.length>3 && ns.length<10){ ns.splice(4,0,1); }
 
     if(ns.length<8) return;
 
@@ -502,21 +467,40 @@ function parserCompar(txt){
   var reg=REG[rayonDetecte];
 
   // 3. PARSING DTF SUD EST
-  // Extraction robuste : getNums sur la ligne DTF pour éviter les problèmes
-  // de flèches ▼ ▲ qui cassaient l'ancienne regex
-  // Structure ligne : DTF SUD EST [CA] [évol_CA%] [▼/▲] [débits] [évol_deb%] [▲/▼] [panier] [évol_pan%]
+  // La ligne titre ("Comparaison magasins | DTF SUD EST - Date") est ignorée
+  // car elle ne contient pas les données. On cherche la ligne DATA qui contient
+  // "DTF SUD EST" ET au moins un nombre décimal (le CA ex: 37,7).
+  // Cas particulier : les débits peuvent être écrits "6 413" (espace milliers)
+  // → getNums donne [6, 413] séparés → fusion nécessaire si ns[i]∈[1-9] et ns[i+1]∈[100-999].
   var dtfLigne=null;
   txt.split('\n').forEach(function(l){
-    if(!dtfLigne && /DTF\s+SUD\s+EST/i.test(l)) dtfLigne=l;
+    if(!dtfLigne && /DTF\s+SUD\s+EST/i.test(l) && /\d+[,\.]\d+/.test(l)) dtfLigne=l;
   });
   if(dtfLigne){
     var dtfNs=getNums(dtfLigne);
-    // dtfNs[0]=CA, dtfNs[1]=évol_CA, dtfNs[2]=débits, dtfNs[3]=évol_deb, dtfNs[4]=panier
-    if(dtfNs.length>=5){
-      reg.dtf.ca =dtfNs[0];
-      reg.dtf.ev =dtfNs[1];
-      reg.dtf.deb=dtfNs[2];
-      reg.dtf.pan=dtfNs[4];
+    // Fusionner les milliers séparés (ex: [6, 413] → 6413)
+    var dtfFused=[];
+    for(var di=0;di<dtfNs.length;di++){
+      if(di<dtfNs.length-1 && dtfNs[di]>=1 && dtfNs[di]<=9 &&
+         dtfNs[di]===Math.round(dtfNs[di]) &&
+         dtfNs[di+1]>=100 && dtfNs[di+1]<=999 &&
+         dtfNs[di+1]===Math.round(dtfNs[di+1])){
+        dtfFused.push(dtfNs[di]*1000+dtfNs[di+1]);
+        di++; // sauter le suivant déjà consommé
+      } else {
+        dtfFused.push(dtfNs[di]);
+      }
+    }
+    // dtfFused[0]=CA, dtfFused[1]=évol_CA, dtfFused[2]=débits, dtfFused[3]=évol_deb, dtfFused[4]=panier
+    if(dtfFused.length>=5){
+      reg.dtf.ca =dtfFused[0];
+      reg.dtf.ev =dtfFused[1];
+      reg.dtf.deb=dtfFused[2];
+      reg.dtf.pan=dtfFused[4];
+    } else if(dtfFused.length>=3){
+      reg.dtf.ca =dtfFused[0];
+      reg.dtf.ev =dtfFused[1];
+      reg.dtf.deb=dtfFused[2];
     }
   }
 
@@ -527,34 +511,36 @@ function parserCompar(txt){
     if(EXCL_C.some(function(ex){return lu.indexOf(ex)!==-1;})) return;
     if(!/^[A-Za-zÀ-ÿ]/.test(ligne)) return;
 
-    var m=ligne.match(/^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9\s\-\'\.]{1,35}?)\s+(\d{1,2})\s+([\d,]+)\s+([-\d,]+)%/);
+    // Regex principale : nom rang ca evol% (évol optionnelle pour magasins à 0,0)
+    var m=ligne.match(/^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9\s\-\'\.]{1,35}?)\s+(\d{1,2})\s+([\d,]+)\s*([-\d,]+%)?/);
     if(!m) return;
 
     var nom=m[1].trim();
     var rang=parseInt(m[2]);
     var ca=pN(m[3]);
-    var ev=pN(m[4]);
-    if(rang<1||rang>40||ca<=0||ca>60||nom.length<3) return;
+    var ev=m[4]?pN(m[4].replace('%','')):0;
+    if(rang<1||rang>40||ca<0||ca>60||nom.length<3) return;
 
     var suite=ligne.substring(m[0].length);
     var sn=getNums(suite);
-    if(!sn.length) return;
 
     var deb=0, pan=0;
     if(sn.length>=2 && (sn[0]===1||sn[0]===2) && sn[1]>=10 && sn[1]<=999){
       deb=sn[0]*1000+sn[1];
       pan=premierEntre(sn,2,1,15);
-    } else {
+    } else if(sn.length>=1){
       deb=Math.round(Math.abs(sn[0]));
-      // Structure suite : [débits, évol_débits%, panier, évol_panier%]
-      // sn[1] = évol_débits (ex: 1.4%), sn[2] = panier (ex: 5.8)
-      // Prendre sn[2] pour éviter de confondre évol_débits avec panier
       pan=(sn.length>=3 && sn[2]>=1 && sn[2]<=15) ? sn[2] : premierEntre(sn,1,1,15);
     }
 
+    // Évolutions débits et panier extraites de sn[]
+    // Structure suite : [deb, evDeb%, pan, evPan%]
+    var evDeb=sn.length>=2 ? sn[1] : 0;
+    var evPan=sn.length>=4 ? sn[3] : (sn.length>=3 && (sn[2]<1||sn[2]>15) ? sn[2] : 0);
+
     var exists=reg.mags.some(function(x){return x.rang===rang;});
     if(!exists) reg.mags.push({
-      rang:rang, nom:nom, ca:ca, ev:ev, deb:deb, pan:pan,
+      rang:rang, nom:nom, ca:ca, ev:ev, deb:deb, evDeb:evDeb, pan:pan, evPan:evPan,
       isMe:/NARBONNE/i.test(nom)
     });
   });
@@ -717,19 +703,8 @@ function buildClosing(d){
 // GÉNÉRATION DU BRIEF
 // ═══════════════════════════════════════════════════
 function onSel(){
-  rayonK=document.getElementById('sel').value||null;
-  document.getElementById('btn-edt').disabled=!rayonK;
-  verifierCorrespondanceRayon(); // vérifier si le bouton région doit être actif
-  var rs=document.getElementById('reg-s');
-  if(rs) rs.style.display='none';
-}
-
-function sg(v){return v>=0?'up':'dn';}
-
-function onSel(){
   var v=document.getElementById('sel').value||null;
   rayonK=(v==='ALIMENTAIRE'||v==='NON_ALIMENTAIRE')?null:v;
-  document.getElementById('btn-edt').disabled=!rayonK;
   verifierCorrespondanceRayon();
   var rs=document.getElementById('reg-s');
   if(rs) rs.style.display='none';
@@ -875,52 +850,9 @@ function genBriefGlobal(type){
   if(nbRegr>nbPerf) alG.push({t:'warn',l:'Plus de rayons en régression ('+nbRegr+') qu\'en progression ('+nbPerf+')'});
   if(!alG.length) alG.push({t:'good',l:'✓ Situation globale satisfaisante'});
 
-  // Synthèse détaillée par département : positifs / négatifs / stables
-  var synthDepts='';
-  depts.forEach(function(dept){
-    var pos=0,neg=0,stab=0;
-    dept.rayons.forEach(function(k){
-      var ev=(D[k]&&D[k].ev)||0;
-      if(ev>0) pos++; else if(ev<0) neg++; else stab++;
-    });
-    var tot=dept.rayons.length;
-    var pctPos=tot?Math.round(pos/tot*100):0;
-    var pctNeg=tot?Math.round(neg/tot*100):0;
-    var barPos=tot?Math.round(pos/tot*100):0;
-    var barNeg=tot?Math.round(neg/tot*100):0;
-    var barStab=100-barPos-barNeg;
-    var statut=pos>neg?'good':neg>pos?'bad':'warn';
-    var coulBord=pos>neg?'#16a34a':neg>pos?'#dc2626':'#ea580c';
-    synthDepts+=
-      '<div style="background:#f9fafb;border-radius:7px;padding:9px 12px;border-left:3px solid '+coulBord+';flex:1;min-width:140px">'+
-        '<div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px">'+dept.nom+' <span style="font-size:10px;font-weight:400;color:#6b7280">('+tot+' rayons)</span></div>'+
-        '<div style="display:flex;gap:10px;align-items:center;margin-bottom:6px">'+
-          '<span style="font-size:13px;font-weight:800;color:#16a34a">▲ '+pos+'</span>'+
-          '<span style="font-size:13px;font-weight:800;color:#dc2626">▼ '+neg+'</span>'+
-          (stab?'<span style="font-size:12px;color:#6b7280">— '+stab+'</span>':'')+
-        '</div>'+
-        '<div style="height:7px;border-radius:4px;overflow:hidden;background:#e5e7eb;display:flex">'+
-          (barPos?'<div style="width:'+barPos+'%;background:#16a34a;border-radius:4px 0 0 4px"></div>':'')+
-          (barStab?'<div style="width:'+barStab+'%;background:#d1d5db"></div>':'')+
-          (barNeg?'<div style="width:'+barNeg+'%;background:#dc2626;border-radius:0 4px 4px 0"></div>':'')+
-        '</div>'+
-      '</div>';
-  });
-
   h+='<div class="card full" style="margin-bottom:12px">'+
     '<div class="ch al">⚡ Synthèse</div>'+
-    '<div style="padding:10px 12px 4px">'+
-      '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">'+synthDepts+'</div>'+
-      '<div style="display:flex;gap:14px;align-items:center;padding:8px 10px;background:#f0fdf4;border-radius:6px;margin-bottom:8px;flex-wrap:wrap">'+
-        '<span style="font-size:12px;font-weight:700;color:#166534">Bilan global :</span>'+
-        '<span style="font-size:13px;font-weight:800;color:#16a34a">▲ '+nbPerf+' rayons positifs</span>'+
-        '<span style="color:#d1d5db">|</span>'+
-        '<span style="font-size:13px;font-weight:800;color:#dc2626">▼ '+nbRegr+' rayons négatifs</span>'+
-        '<span style="color:#d1d5db">|</span>'+
-        '<span style="font-size:12px;color:#6b7280">'+nbTot+' rayons au total</span>'+
-      '</div>'+
-      '<div class="alerts" style="padding:0 0 6px">'+alG.map(function(a){return '<span class="chip '+a.t+'">'+a.l+'</span>';}).join('')+'</div>'+
-    '</div>'+
+    '<div class="alerts">'+alG.map(function(a){return '<span class="chip '+a.t+'">'+a.l+'</span>';}).join('')+'</div>'+
   '</div>';
 
   h+='<div class="closing"><div class="cl-ico">📊</div><div>'+
@@ -933,7 +865,6 @@ function genBriefGlobal(type){
   document.getElementById('brief-c').innerHTML=h;
   document.getElementById('brief').style.display='block';
   document.getElementById('brief').scrollIntoView({behavior:'smooth',block:'start'});
-  document.getElementById('btn-edt').disabled=true;
   document.getElementById('btn-reg').disabled=true;
 }
 
@@ -946,45 +877,134 @@ function genBrief(){
 
   rayonK=k;
   var m=META[k], d=D[k]||{};
+  SHOT=null;
 
-  // Lire consignes AVANT reset (SHOT temporaire)
-  var c=getCons(k);
-  SHOT=null; // réinitialisation après usage (one-shot)
-  majBtnEdit();
-
-  var al=[];
-  if(d.stk>20)     al.push({t:'bad',l:'⚠ '+d.stk+' stocks négatifs'});
-  else if(d.stk>0) al.push({t:'warn',l:d.stk+' stocks négatifs'});
-  if(d.rupt>50)     al.push({t:'bad',l:'⚠ '+d.rupt+' ruptures assortiment'});
-  else if(d.rupt>0) al.push({t:'warn',l:d.rupt+' ruptures assortiment'});
-  if(d.ev<-15)  al.push({t:'bad',l:'CA en forte baisse ('+(d.ev>=0?'+':'')+d.ev.toFixed(1)+'%)'});
-  if(d.dm<-3)   al.push({t:'bad',l:'Marge en recul ('+(d.dm>=0?'+':'')+d.dm.toFixed(2)+' pts)'});
-  if(d.dm>2)    al.push({t:'good',l:'✓ Marge en progression (+'+d.dm.toFixed(2)+' pts)'});
-  if(d.er>10)   al.push({t:'good',l:'✓ Progression nationale (+'+d.er+' places)'});
-  if(d.bud<-2)  al.push({t:'warn',l:'Écart budget '+d.bud.toFixed(1)+' K€'});
-  if(!al.length) al.push({t:'good',l:'✓ Situation globale correcte'});
-
-  function opR(t,n){
-    if(!t) return '';
-    return '<div class="ci"><div class="cn">'+n+'</div><div class="ct">'+fmtC(t)+'</div></div>';
-  }
-  function clR(t,n){
-    if(!t) return '';
-    return '<div class="ci cl"><div class="cn">'+n+'</div><div class="ct">'+fmtC(t)+'</div></div>';
-  }
-  function mR(t,isCl){
-    return '<div class="ci man'+(isCl?' cl':'')+'"><div class="cn">+</div><div class="ct">'+esc(t)+'<span class="mbadge">MANUEL</span></div></div>';
-  }
-
-  var opH=c.op.map(function(t,i){return opR(t,i+1);}).join('');
-  if(mOp1) opH+=mR(mOp1,false);
-  if(mOp2) opH+=mR(mOp2,false);
-  var clH=c.cl.map(function(t,i){return clR(t,i+1);}).join('');
-  if(mCl) clH+=mR(mCl,true);
-
+  // ── Indicateurs dérivés ──────────────────────────────
   var erl=(d.er>0?'+':'')+d.er+' place'+(Math.abs(d.er)>1?'s':'');
+  var cEv=sg(d.ev), cBud=sg(d.bud), cDm=sg(d.dm);
+  var cEr=d.er>0?'up':d.er<0?'dn':'nt';
+  var cRupt=d.rupt>50?'color:#dc2626':d.rupt>0?'color:#ea580c':'color:#16a34a';
+  var cStk=d.stk>20?'color:#dc2626':d.stk>0?'color:#ea580c':'color:#16a34a';
 
+  // ── Chips d'alerte ───────────────────────────────────
+  var al=[];
+  if(d.ev<-20)       al.push({t:'bad', l:'⚠ CA en chute ('+(d.ev>=0?'+':'')+d.ev.toFixed(1)+'%)'});
+  else if(d.ev<-5)   al.push({t:'warn',l:'CA en recul ('+(d.ev>=0?'+':'')+d.ev.toFixed(1)+'%)'});
+  else if(d.ev>5)    al.push({t:'good',l:'✓ CA en hausse (+'+d.ev.toFixed(1)+'%)'});
+  if(d.bud<-5)       al.push({t:'bad', l:'⚠ Budget : '+d.bud.toFixed(1)+' K€'});
+  else if(d.bud<-1)  al.push({t:'warn',l:'Budget : '+d.bud.toFixed(1)+' K€'});
+  else if(d.bud>0)   al.push({t:'good',l:'✓ Budget : +'+(d.bud).toFixed(1)+' K€'});
+  if(d.dm<-3)        al.push({t:'bad', l:'⚠ Marge : '+(d.dm>=0?'+':'')+d.dm.toFixed(2)+' pts'});
+  else if(d.dm<-0.5) al.push({t:'warn',l:'Marge : '+(d.dm>=0?'+':'')+d.dm.toFixed(2)+' pts'});
+  else if(d.dm>1)    al.push({t:'good',l:'✓ Marge : +'+(d.dm).toFixed(2)+' pts'});
+  if(d.rupt>50)      al.push({t:'bad', l:'⚠ '+d.rupt+' ruptures catalogue'});
+  else if(d.rupt>0)  al.push({t:'warn',l:d.rupt+' ruptures catalogue'});
+  if(d.stk>20)       al.push({t:'bad', l:'⚠ '+d.stk+' stocks négatifs'});
+  else if(d.stk>0)   al.push({t:'warn',l:d.stk+' stocks négatifs'});
+  if(d.er>10)        al.push({t:'good',l:'✓ Rang national : +'+d.er+' places'});
+  else if(d.er<-10)  al.push({t:'warn',l:'Rang national : '+d.er+' places'});
+  if(!al.length)     al.push({t:'good',l:'✓ Tous les indicateurs au vert'});
+
+  // ── Résumé textuel automatique ───────────────────────
+  var phrases=[];
+  // CA
+  if(d.ev<-20)      phrases.push('Le CA est en <strong>chute de '+Math.abs(d.ev).toFixed(1)+'%</strong> vs N-1 ('+d.ca.toFixed(1)+' K€).');
+  else if(d.ev<0)   phrases.push('Le CA recule de <strong>'+Math.abs(d.ev).toFixed(1)+'%</strong> vs N-1 ('+d.ca.toFixed(1)+' K€).');
+  else if(d.ev>0)   phrases.push('Le CA progresse de <strong>+'+d.ev.toFixed(1)+'%</strong> vs N-1 ('+d.ca.toFixed(1)+' K€).');
+  else              phrases.push('Le CA est stable à <strong>'+d.ca.toFixed(1)+' K€</strong> vs N-1.');
+  // Budget
+  if(d.bud<0)       phrases.push('Écart budget de <strong>'+(d.bud).toFixed(1)+' K€</strong>'+(Math.abs(d.bud)>5?' — situation préoccupante.':'.'));
+  else if(d.bud>0)  phrases.push('Budget <strong>dépassé de +'+(d.bud).toFixed(1)+' K€</strong> — bonne performance.');
+  // Marge
+  if(d.taux>0){
+    var mStr='Taux de marge à <strong>'+d.taux.toFixed(2)+'%</strong>';
+    if(d.dm<-1)      phrases.push(mStr+', en recul de <strong>'+(d.dm).toFixed(2)+' pts</strong> vs N-1.');
+    else if(d.dm>1)  phrases.push(mStr+', en hausse de <strong>+'+(d.dm).toFixed(2)+' pts</strong> vs N-1.');
+    else             phrases.push(mStr+' (stable vs N-1).');
+  }
+  // Rang
+  if(d.rang>0){
+    var rStr='Classé <strong>'+d.rang+'e au niveau national</strong>';
+    if(d.er>0)       phrases.push(rStr+' (+'+d.er+' places gagnées).');
+    else if(d.er<0)  phrases.push(rStr+' ('+d.er+' places perdues).');
+    else             phrases.push(rStr+' (stable).');
+  }
+  // Opérationnel
+  var opArr=[];
+  if(d.rupt>0)  opArr.push('<strong>'+d.rupt+' rupture'+(d.rupt>1?'s':'')+' catalogue</strong> à traiter en priorité');
+  if(d.stk>0)   opArr.push('<strong>'+d.stk+' stock'+(d.stk>1?'s':'')+' négatif'+(d.stk>1?'s':'')+' </strong> à corriger');
+  if(opArr.length) phrases.push('Points opérationnels : '+opArr.join(' — ')+'.');
+  else phrases.push('Aucune alerte opérationnelle (ruptures et stocks OK).');
+  // Région
+  if(hasReg && meMag){
+    var rRegStr='<strong>'+rangRegLabel+'</strong> dans la DTF SUD EST';
+    if(rangReg<=Math.ceil(nbMags/3))      phrases.push('Classement régional : '+rRegStr+' — dans le <strong>1er tiers</strong> de la région.');
+    else if(rangReg>Math.floor(nbMags*2/3)) phrases.push('Classement régional : '+rRegStr+' — dans le <strong>dernier tiers</strong> de la région, marge de progression.');
+    else                                    phrases.push('Classement régional : '+rRegStr+' — positionnement médian.');
+  }
+
+  var resumeH=phrases.map(function(p){
+    return '<div style="padding:5px 0;border-bottom:1px solid #f0f3f8;font-size:13px;line-height:1.6;color:#374151">'+p+'</div>';
+  }).join('');
+
+  // ── Données régionales (si PDF Comparaison chargé et correspondant) ──
+  var hasReg=(k===RAYON_PDF_COMPAR && REG[k] && REG[k].mags && REG[k].mags.length>0);
+  var reg=hasReg?REG[k]:null;
+  var meMag=reg?reg.mags.filter(function(mg){return mg.isMe;})[0]:null;
+  var rangReg=meMag?meMag.rang:0;
+  var nbMags=reg?reg.mags.length:0;
+  var caReg=meMag?meMag.ca:0;
+  var evReg=meMag?meMag.ev:0;
+  // Position relative : combien de magasins au-dessus en CA
+  var rangRegLabel=rangReg>0?rangReg+'e / '+nbMags+' mag.':'—';
+  var cRangReg=rangReg>0&&rangReg<=Math.ceil(nbMags/3)?'color:#16a34a':rangReg>0&&rangReg>Math.floor(nbMags*2/3)?'color:#dc2626':'color:#ea580c';
+
+  // ── Tableau de données détaillé ──────────────────────
+  function ligne(label,val,cl,extra){
+    return '<tr>'+
+      '<td style="padding:7px 10px;color:#6b7280;font-size:12px;font-weight:600;white-space:nowrap">'+label+'</td>'+
+      '<td style="padding:7px 10px;font-weight:700;font-size:13px;text-align:right;'+(cl||'')+'">'+val+'</td>'+
+      (extra!==undefined?'<td style="padding:7px 10px;font-size:12px;color:#6b7280;text-align:right">'+extra+'</td>':'<td></td>')+
+    '</tr>';
+  }
+  function ligneSep(label){
+    return '<tr><td colspan="3" style="padding:7px 10px 6px;font-size:12px;font-weight:800;letter-spacing:.3px;color:#1e40af;background:linear-gradient(90deg,#dbeafe,#eff6ff);border-top:2px solid #3b82f6;border-bottom:1px solid #bfdbfe">🌍 '+label+'</td></tr>';
+  }
+
+  var lignesReg='';
+  if(hasReg && meMag){
+    var evDebStr=(meMag.evDeb>=0?'+':'')+meMag.evDeb.toFixed(1)+'% vs N-1';
+    var evPanStr=(meMag.evPan>=0?'+':'')+meMag.evPan.toFixed(1)+'% vs N-1';
+    var cEvDeb='color:'+(meMag.evDeb>=0?'#16a34a':'#dc2626');
+    var cEvPan='color:'+(meMag.evPan>=0?'#16a34a':'#dc2626');
+    lignesReg=
+      ligneSep('Classement Régional DTF SUD EST')+
+      ligne('Rang Régional',rangRegLabel,cRangReg,(evReg>=0?'+':'')+evReg.toFixed(1)+'% vs N-1')+
+      ligne('CA Régional (Vous)',caReg.toFixed(1)+' K€','color:#0369a1','/ DTF : '+reg.dtf.ca.toFixed(1)+' K€')+
+      ligne('Débits Région',meMag.deb.toLocaleString('fr-FR'),cEvDeb,evDebStr)+
+      ligne('Panier Moyen',meMag.pan.toFixed(1)+' €',cEvPan,evPanStr);
+  }
+
+  var tblH=
+    '<table style="width:100%;border-collapse:collapse">'+
+    '<thead><tr style="background:#eff6ff">'+
+      '<th style="padding:7px 10px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;color:#6b7280;border-bottom:1px solid #dbeafe">Indicateur</th>'+
+      '<th style="padding:7px 10px;text-align:right;font-size:11px;font-weight:700;text-transform:uppercase;color:#6b7280;border-bottom:1px solid #dbeafe">Valeur</th>'+
+      '<th style="padding:7px 10px;text-align:right;font-size:11px;font-weight:700;text-transform:uppercase;color:#6b7280;border-bottom:1px solid #dbeafe">Contexte</th>'+
+    '</tr></thead><tbody>'+
+    ligne('CA Jour',d.ca.toFixed(1)+' K€','color:'+(d.ev>=0?'#16a34a':'#dc2626'),(d.ev>=0?'+':'')+d.ev.toFixed(1)+'% vs N-1')+
+    ligne('Écart Budget',(d.bud>=0?'+':'')+d.bud.toFixed(1)+' K€','color:'+(d.bud>=0?'#16a34a':'#dc2626'),d.bud>=0?'Objectif dépassé':'Objectif manqué')+
+    ligne('Taux de Marge',d.taux.toFixed(2)+'%','color:#0369a1',(d.dm>=0?'+':'')+d.dm.toFixed(2)+' pts vs N-1')+
+    ligne('Diff. Marge N-1',(d.dm>=0?'+':'')+d.dm.toFixed(2)+' pts','color:'+(d.dm>=0?'#16a34a':'#dc2626'),d.dm>=0?'En progression':'En recul')+
+    ligne('Rang National',''+d.rang,'color:#7c3aed',erl+' vs hier')+
+    ligne('Ruptures',d.rupt>0?''+d.rupt:'0',d.rupt>50?'color:#dc2626':d.rupt>0?'color:#ea580c':'color:#16a34a',d.rupt>50?'⚠ Critique':d.rupt>0?'À traiter':'OK')+
+    ligne('Stocks Négatifs',d.stk>0?''+d.stk:'0',d.stk>20?'color:#dc2626':d.stk>0?'color:#ea580c':'color:#16a34a',d.stk>20?'⚠ Critique':d.stk>0?'À corriger':'OK')+
+    lignesReg+
+    '</tbody></table>';
+
+  // ── Assemblage HTML ───────────────────────────────────
   var h=
+    // Bandeau KPIs réorganisé : CA + Évol / Budget / Marge + Diff / Rang + Évol / Rupt / Stk
     '<div class="b-hdr">'+
       '<div>'+
         '<div style="font-size:11px;opacity:.65">Rayon '+m.n+' · '+m.par+' · HF7152 — Narbonne</div>'+
@@ -992,30 +1012,52 @@ function genBrief(){
         '<div class="b-meta">'+(DATE_STR||'—')+' — Source Darwin</div>'+
       '</div>'+
       '<div class="kpis">'+
-        '<div class="kpi"><div class="kv '+sg(d.ev)+'">'+d.ca.toFixed(1)+' K€</div><div class="kl">CA Jour</div></div>'+
-        '<div class="kpi"><div class="kv '+sg(d.ev)+'">'+(d.ev>=0?'+':'')+d.ev.toFixed(1)+'%</div><div class="kl">Évol N-1</div></div>'+
+        '<div class="kpi"><div class="kv '+cEv+'">'+d.ca.toFixed(1)+' K€</div><div class="kl">CA Jour</div></div>'+
+        '<div class="kpi"><div class="kv '+cEv+'">'+(d.ev>=0?'+':'')+d.ev.toFixed(1)+'%</div><div class="kl">Évol N-1</div></div>'+
+        '<div class="kpi"><div class="kv '+cBud+'">'+(d.bud>=0?'+':'')+d.bud.toFixed(1)+' K€</div><div class="kl">Écart Budget</div></div>'+
         '<div class="kpi"><div class="kv up">'+d.taux.toFixed(2)+'%</div><div class="kl">Taux Marge</div></div>'+
-        '<div class="kpi"><div class="kv '+sg(d.dm)+'">'+(d.dm>=0?'+':'')+d.dm.toFixed(2)+' pts</div><div class="kl">Diff Marge N-1</div></div>'+
-        '<div class="kpi"><div class="kv '+sg(d.bud)+'">'+(d.bud>=0?'+':'')+d.bud.toFixed(1)+' K€</div><div class="kl">Écart Budget</div></div>'+
-        '<div class="kpi"><div class="kv '+(d.er>0?'up':d.er<0?'dn':'nt')+'">Rang '+d.rang+'</div><div class="kl">National ('+erl+')</div></div>'+
+        '<div class="kpi"><div class="kv '+cDm+'">'+(d.dm>=0?'+':'')+d.dm.toFixed(2)+' pts</div><div class="kl">Diff Marge</div></div>'+
+        '<div class="kpi"><div class="kv '+cEr+'">'+d.rang+'e</div><div class="kl">Rang ('+erl+')</div></div>'+
+        '<div class="kpi"><div class="kv" style="color:#111827;background:'+( d.rupt>50?'#fee2e2':d.rupt>0?'#ffedd5':'#dcfce7')+';border-radius:6px;padding:2px 6px">'+d.rupt+'</div><div class="kl">Rupt. Cata.</div></div>'+
+        '<div class="kpi"><div class="kv" style="color:#111827;background:'+(d.stk>20?'#fee2e2':d.stk>0?'#ffedd5':'#dcfce7')+';border-radius:6px;padding:2px 6px">'+d.stk+'</div><div class="kl">Stk Nég.</div></div>'+
       '</div>'+
     '</div>'+
-    '<div class="card full" style="margin-bottom:12px">'+
-      '<div class="ch al">⚡ Points d\'attention du jour</div>'+
-      '<div class="alerts">'+al.map(function(a){return '<span class="chip '+a.t+'">'+a.l+'</span>';}).join('')+'</div>'+
+
+    // Grille : tableau données (gauche) + résumé+chips (droite)
+    '<div class="g2" style="margin-bottom:12px">'+
+      '<div class="card">'+
+        '<div class="ch op">📊 Données chiffrées</div>'+
+        tblH+
+      '</div>'+
+      '<div class="card">'+
+        '<div class="ch al">⚡ Synthèse</div>'+
+        '<div style="padding:10px 14px 4px">'+resumeH+'</div>'+
+        '<div class="alerts" style="padding:8px 12px 10px">'+
+          al.map(function(a){return '<span class="chip '+a.t+'">'+a.l+'</span>';}).join('')+
+        '</div>'+
+      '</div>'+
     '</div>'+
-    '<div class="g2">'+
-      '<div class="card"><div class="ch op">⚙️ Consignes Opérationnelles</div><div class="clist">'+opH+'</div></div>'+
-      '<div class="card"><div class="ch cl">🧹 Propreté & Tenue du Rayon</div><div class="clist">'+clH+'</div></div>'+
-    '</div>'+
+
     '<div id="reg-s" style="display:none"></div>'+
+    // Consignes manuelles — affichées avant le bandeau de clôture
+    (function(){
+      if(!mOp1 && !mOp2 && !mCl) return '';
+      var items='';
+      if(mOp1) items+='<div style="padding:7px 0;border-bottom:1px solid #e0e7ff;font-size:13px;color:#1e293b;line-height:1.6">'+esc(mOp1)+'</div>';
+      if(mOp2) items+='<div style="padding:7px 0;border-bottom:1px solid #e0e7ff;font-size:13px;color:#1e293b;line-height:1.6">'+esc(mOp2)+'</div>';
+      if(mCl)  items+='<div style="padding:7px 0;font-size:13px;color:#1e293b;line-height:1.6">'+esc(mCl)+'</div>';
+      return '<div class="card full" style="margin-bottom:12px;border-left:4px solid #7c3aed">'+
+        '<div class="ch" style="background:#f5f3ff;color:#5b21b6">✏️ Consignes du jour</div>'+
+        '<div style="padding:4px 14px 10px">'+items+'</div>'+
+      '</div>';
+    })()+
     buildClosing(d)+
     '<div class="bfoot">Brief généré — HF7152 Narbonne — '+(DATE_STR||new Date().toLocaleDateString('fr-FR'))+' — Confidentiel Carrefour</div>';
 
   document.getElementById('brief-c').innerHTML=h;
   document.getElementById('brief').style.display='block';
   document.getElementById('brief').scrollIntoView({behavior:'smooth',block:'start'});
-  verifierCorrespondanceRayon(); // re-vérifier après génération
+  verifierCorrespondanceRayon();
 }
 
 // ═══════════════════════════════════════════════════
@@ -1169,17 +1211,9 @@ function appEdit(){
     if(v !== (CO[k]||'')){ shot[k]=v; has=true; }
   });
   SHOT=has?shot:null;
-  majBtnEdit();
   fov('ov-edt');
 }
 
-function majBtnEdit(){
-  var b=document.getElementById('btn-edt'); if(!b) return;
-  b.disabled=!document.getElementById('sel').value;
-  var has=SHOT&&Object.keys(SHOT).length>0;
-  b.classList.toggle('on',has);
-  b.textContent=has?'⚙️ Consignes à appliquer ●':'⚙️ Modifier consignes';
-}
 
 // ═══════════════════════════════════════════════════
 // IMPRESSION — iframe invisible, popup uniquement
