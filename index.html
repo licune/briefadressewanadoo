@@ -1216,87 +1216,148 @@ function appEdit(){
 
 
 // ═══════════════════════════════════════════════════
-// IMPRESSION — iframe invisible, popup uniquement
+// ═══════════════════════════════════════════════════
+// IMPRESSION
+// Format : A4 portrait
+// Page 1 : bandeau KPI + données + synthèse + consignes + closing (sandwich)
+// Page 2 : classement régional uniquement (si chargé)
 // ═══════════════════════════════════════════════════
 function imprimer(){
   var c=document.getElementById('brief-c');
   if(!c||!c.innerHTML.trim()){alert("Générez d'abord un brief.");return;}
 
+  // Styles source
   var st='';
   document.querySelectorAll('style').forEach(function(s){st+=s.innerHTML;});
 
-  // Détecter si le classement régional est affiché
-  var regS=document.getElementById('reg-s');
-  var hasReg=regS&&regS.style.display!=='none'&&regS.innerHTML.trim()!=='';
+  // Détecter classement régional visible
+  var regEl=document.getElementById('reg-s');
+  var hasReg=regEl&&regEl.style.display!=='none'&&regEl.innerHTML.trim()!=='';
 
-  // ── POINT 2 : cloner le HTML et déplacer #reg-s juste avant .closing ──
-  var printDiv=document.createElement('div');
-  printDiv.innerHTML=c.innerHTML;
+  // ── Construire page 1 ──
+  // Cloner brief-c, supprimer #reg-s et les lignes DTF du tableau
+  var d1=document.createElement('div');
+  d1.innerHTML=c.innerHTML;
+  var rs1=d1.querySelector('#reg-s');
+  if(rs1) rs1.parentNode.removeChild(rs1);
+  var p1=d1.innerHTML;
+
+  // ── Construire page 2 ──
+  var p2html='';
   if(hasReg){
-    var regEl=printDiv.querySelector('#reg-s');
-    var closingEl=printDiv.querySelector('.closing');
-    if(regEl&&closingEl){
-      regEl.parentNode.removeChild(regEl);
-      regEl.style.display='block';
-      closingEl.parentNode.insertBefore(regEl,closingEl);
+    var reg=window.REG&&window.REG[window.rayonK]?window.REG[window.rayonK]:null;
+    var meta=window.META&&window.META[window.rayonK]?window.META[window.rayonK]:null;
+    if(reg){
+      // Reconstruire le tableau depuis les données brutes
+      var rows='';
+      reg.mags.forEach(function(mg){
+        var evCl=mg.ev>=0?'color:#16a34a':'color:#dc2626';
+        var meBg=mg.isMe?'background:#fefce8;font-weight:800;':'';
+        rows+='<tr style="'+meBg+'">'+
+          '<td style="padding:6px 4px;text-align:center"><span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#eff6ff;font-weight:800;font-size:11px">'+mg.rang+'</span></td>'+
+          '<td style="padding:6px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(mg.isMe?'<strong>'+mg.nom+' ← Vous</strong>':mg.nom)+'</td>'+
+          '<td style="padding:6px 4px;text-align:right">'+mg.ca.toFixed(1)+' K€</td>'+
+          '<td style="padding:6px 4px;text-align:right;'+evCl+';font-weight:700">'+(mg.ev>=0?'+':'')+mg.ev.toFixed(1)+'%</td>'+
+          '<td style="padding:6px 4px;text-align:right">'+mg.deb+'</td>'+
+          '<td style="padding:6px 4px;text-align:right">'+mg.pan.toFixed(1)+' €</td>'+
+        '</tr>';
+      });
+      p2html=
+        '<div style="border:2px solid #1e3a5f;border-radius:8px;overflow:hidden;margin-bottom:10px">'+
+          '<div style="background:#1e3a5f;color:#fff;padding:10px 14px;font-size:15px;font-weight:800">'+
+            '🌍 Classement Régional DTF SUD EST'+(meta?' — Rayon '+meta.n+' '+meta.nom:'')+'</div>'+
+          '<div style="padding:8px 14px;font-size:13px;color:#374151;font-weight:600;border-bottom:1px solid #dbeafe">'+
+            'DTF : <strong>'+reg.dtf.ca.toFixed(1)+' K€</strong>'+
+            ' ('+(reg.dtf.ev>=0?'+':'')+reg.dtf.ev.toFixed(1)+'% vs N-1)'+
+            ' &nbsp;·&nbsp; Débits : <strong>'+reg.dtf.deb.toLocaleString('fr-FR')+'</strong>'+
+            ' &nbsp;·&nbsp; Panier : <strong>'+reg.dtf.pan.toFixed(1)+' €</strong>'+
+          '</div>'+
+        '</div>'+
+        '<div style="border:2px solid #1e3a5f;border-radius:8px;overflow:hidden">'+
+          '<table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed">'+
+            '<colgroup>'+
+              '<col style="width:8%">'+
+              '<col style="width:40%">'+
+              '<col style="width:13%">'+
+              '<col style="width:13%">'+
+              '<col style="width:13%">'+
+              '<col style="width:13%">'+
+            '</colgroup>'+
+            '<thead><tr style="background:#eff6ff">'+
+              '<th style="padding:7px 4px;text-align:center;font-size:11px;border-bottom:2px solid #1e3a5f">Rang</th>'+
+              '<th style="padding:7px 6px;text-align:left;font-size:11px;border-bottom:2px solid #1e3a5f">Magasin</th>'+
+              '<th style="padding:7px 4px;text-align:right;font-size:11px;border-bottom:2px solid #1e3a5f">CA</th>'+
+              '<th style="padding:7px 4px;text-align:right;font-size:11px;border-bottom:2px solid #1e3a5f">Évol</th>'+
+              '<th style="padding:7px 4px;text-align:right;font-size:11px;border-bottom:2px solid #1e3a5f">Débits</th>'+
+              '<th style="padding:7px 4px;text-align:right;font-size:11px;border-bottom:2px solid #1e3a5f">Panier</th>'+
+            '</tr></thead>'+
+            '<tbody>'+rows+'</tbody>'+
+          '</table>'+
+        '</div>';
     }
   }
-  var printHTML=printDiv.innerHTML;
 
-  var iframe=document.createElement('iframe');
-  iframe.style.cssText='position:fixed;top:0;left:0;width:0;height:0;border:none;visibility:hidden';
-  document.body.appendChild(iframe);
-
-  var doc=iframe.contentWindow.document;
-  doc.open();
-  doc.write(
-    '<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><title>Brief</title>'+
-    '<style>'+st+
-    '@page{size:A4 landscape;margin:7mm}'+
-    'html,body{margin:0;padding:0;background:#fff}'+
-    'body{padding:4px;box-sizing:border-box}'+
-    '.ctrl,.ov{display:none!important}'+
+  // ── CSS impression ──
+  var css=
+    '@page{size:A4 portrait;margin:16mm}'+
+    '@media print{@page{size:A4 portrait;margin:16mm}}'+
+    'html{margin:0;padding:0;background:#fff}'+
+    // Contraindre le corps à 165mm — largeur sûre quelle que soit l'imprimante
+    // A4 portrait = 210mm, marges navigateur ~20mm chaque côté max → 170mm utile
+    // On prend 165mm pour avoir une marge de sécurité de 5mm
+    'body{margin:0 auto;padding:0;background:#fff;width:165mm;max-width:165mm}'+
+    '*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;box-sizing:border-box!important}'+
+    '.ctrl,.ov,.hdr{display:none!important}'+
     '#brief{display:block!important}'+
-    '.wrap{max-width:100%!important;padding:0!important}'+
-    '*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}'+
-    // Police générale page 1
-    '#brief-c>*:not(#reg-s){font-size:113%}'+
-    'table{font-size:12px}'+
-    'th,td{padding:5px 7px!important}'+
-    // POINT 1 : bandeau KPI agrandi significativement
-    '.b-hdr{padding:18px 22px!important;margin-bottom:12px!important}'+
-    '.b-title{font-size:26px!important}'+
-    '.kpis{gap:10px!important}'+
-    '.kpi{padding:12px 14px!important;min-width:96px!important}'+
-    '.kv{font-size:22px!important;font-weight:800!important}'+
-    '.kl{font-size:11px!important;margin-top:4px!important}'+
-    '.ch{font-size:13px!important}'+
-    '.chip{font-size:12px!important;padding:4px 10px!important}'+
-    '.ct{font-size:13px!important}'+
-    // NE PAS bloquer les coupures sur .card et .closing → page 1 coule librement
-    // et le closing reste sur la même page que la grille
-    '.b-hdr{page-break-inside:avoid;break-inside:avoid}'+
-    '.b-hdr,.closing{-webkit-print-color-adjust:exact;print-color-adjust:exact}'+
-    // POINT 3 : #reg-s entier (header + tableau) sur une seule page 2, sans coupure
-    (hasReg?
-      '#reg-s{page-break-before:always!important;break-before:page!important;display:block!important;page-break-inside:avoid!important;break-inside:avoid!important}'+
-      '#reg-s *{page-break-inside:avoid!important;break-inside:avoid!important}'
-    :'#reg-s{display:none!important}')+
-    '</style></head>'+
-    '<body><div style="width:100%">'+printHTML+'</div></body></html>'
-  );
-  doc.close();
+    '.wrap{width:100%!important;max-width:100%!important;padding:0!important;margin:0!important}'+
+    '#brief,#brief-c{width:100%!important;max-width:100%!important}'+
+    // Sauts de page propres
+    '.p1{page-break-after:always;break-after:page;width:100%}'+
+    '.p2{page-break-before:always;break-before:page;width:100%}'+
+    // Bandeau KPI
+    '.b-hdr{width:100%!important;padding:10px 14px!important;margin-bottom:8px!important}'+
+    '.b-title{font-size:24px!important;font-weight:900!important;line-height:1.1!important}'+
+    '.b-meta{font-size:10px!important;font-weight:500!important}'+
+    '.kpis{flex-wrap:wrap!important;gap:4px!important}'+
+    '.kpi{min-width:60px!important;padding:6px 4px!important;text-align:center!important}'+
+    '.kv{font-size:15px!important;font-weight:900!important;display:block!important}'+
+    '.kl{font-size:9px!important;margin-top:2px!important;display:block!important;font-weight:700!important}'+
+    // Grille 2 colonnes
+    '.g2{display:grid!important;grid-template-columns:1fr 1fr!important;gap:7px!important;margin-bottom:7px!important}'+
+    '.card{border:1.5px solid #334155!important;border-radius:5px!important;break-inside:avoid!important}'+
+    'table{font-size:10px!important;width:100%!important;border-collapse:collapse!important}'+
+    'th{padding:4px 5px!important;font-size:9px!important;font-weight:800!important;border-bottom:1.5px solid #334155!important}'+
+    'td{padding:4px 5px!important;font-size:10px!important;border-bottom:1px solid #e2e8f0!important}'+
+    '.ch{font-size:11px!important;font-weight:800!important;padding:5px 8px!important}'+
+    '.chip{font-size:9px!important;padding:2px 6px!important;font-weight:700!important}'+
+    '.ct{font-size:10px!important;line-height:1.5!important}'+
+    '.alerts{padding:4px 6px 6px!important;gap:3px!important;flex-wrap:wrap!important}'+
+    // Closing
+    '.closing{padding:7px 10px!important;margin-bottom:4px!important;break-inside:avoid!important}'+
+    '.cl-ico{font-size:18px!important}'+
+    '.cl-t{font-size:12px!important;font-weight:900!important}'+
+    '.cl-s{font-size:10px!important;margin-top:1px!important}'+
+    '.card.full{margin-bottom:4px!important;break-inside:avoid!important}'+
+    '.bfoot{font-size:8px!important;padding:3px 0!important;text-align:center!important}';
 
-  iframe.contentWindow.focus();
+  // ── Ouvrir fenêtre d'impression ──
+  var w=window.open('','_blank','width=900,height=700');
+  if(!w){alert("Autoriser les popups pour ce site puis relancer.");return;}
+  w.document.write(
+    '<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><title>Brief HF7152</title>'+
+    '<style>'+st+css+'</style></head><body>'+
+    '<div class="'+(hasReg&&p2html?'p1':'')+'">'+p1+'</div>'+
+    (hasReg&&p2html?'<div class="p2">'+p2html+'</div>':'')+
+    '</body></html>'
+  );
+  w.document.close();
+  w.focus();
   setTimeout(function(){
-    iframe.contentWindow.print();
-    setTimeout(function(){ document.body.removeChild(iframe); }, 1000);
-  }, 300);
+    w.print();
+    setTimeout(function(){w.close();},2000);
+  },800);
 }
 
-// ═══════════════════════════════════════════════════
-// UTILS
-// ═══════════════════════════════════════════════════
 function esc(s){
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
